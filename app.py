@@ -52,7 +52,8 @@ def stop():
 
 @app.post("/api/rect")
 def save_rect(body: dict):
-    manager.save_rect(str(body.get("channel", "")), body.get("rect", {}))
+    manager.save_rects(str(body.get("channel", "")), body.get("webcam", {}),
+                       body.get("gameplay", {}))
     return {"ok": True}
 
 

@@ -1,9 +1,13 @@
 {
   "pre": 20,
-  "post": 10,
+  "post": 30,
   "cooldown": 60,
   "window": 10,
   "baseline_window": 300,
   "k": 3,
-  "min_rate": 8
+  "min_rate": 8,
+  "max_clip": 50,
+  "subtitles": true,
+  "subtitle_model": "small",
+  "subtitle_language": null
 }

@@ -124,6 +124,19 @@ button:disabled { opacity: .45; cursor: default; }
 .rectinputs { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-start; }
 .rectinputs label { color: var(--dim); display: flex; align-items: center; gap: 6px; }
 .rectinputs input { width: 68px; }
+.rectinputs fieldset {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.rectinputs legend { color: var(--dim); font-size: 12px; padding: 0 4px; }
+.rectinputs fieldset.webcam { border-color: #2f5f4a; }
+.rectinputs fieldset.gameplay { border-color: #2a4a70; }
+.rectactions { display: flex; gap: 8px; flex-basis: 100%; }
 .hint { flex-basis: 100%; color: var(--dim); font-size: 12px; margin: 4px 0 0; }
 
 pre#log {

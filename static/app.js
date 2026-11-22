@@ -45,6 +45,16 @@ function drawSpark(state) {
   }
 }
 
+function drawBox(ctx, rect, w, h, color, label) {
+  const x = rect.x * w, y = rect.y * h, bw = rect.w * w, bh = rect.h * h;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  ctx.strokeRect(x, y, bw, bh);
+  ctx.fillStyle = color;
+  ctx.font = "bold 12px Segoe UI, sans-serif";
+  ctx.fillText(label, x + 4, y + 14);
+}
+
 function drawPreview() {
   const c = $("preview");
   const ctx = c.getContext("2d");
@@ -57,26 +67,30 @@ function drawPreview() {
   }
   $("nopreview").style.display = previewImg ? "none" : "grid";
 
-  const rect = readRect();
-  ctx.strokeStyle = "#6ee7a8";
-  ctx.lineWidth = 2;
-  ctx.strokeRect(rect.x * c.width, rect.y * c.height, rect.w * c.width, rect.h * c.height);
+  const rects = readRects();
+  drawBox(ctx, rects.gameplay, c.width, c.height, "#5aa9ff", "gameplay");
+  drawBox(ctx, rects.webcam, c.width, c.height, "#6ee7a8", "webcam");
 }
 
-function readRect() {
-  return {
-    x: (+$("rx").value || 0) / 100,
-    y: (+$("ry").value || 0) / 100,
-    w: (+$("rw").value || 1) / 100,
-    h: (+$("rh").value || 1) / 100,
+function readRects() {
+  const read = (p) => ({
+    x: (+$(p + "x").value || 0) / 100,
+    y: (+$(p + "y").value || 0) / 100,
+    w: (+$(p + "w").value || 1) / 100,
+    h: (+$(p + "h").value || 1) / 100,
+  });
+  return { webcam: read("w"), gameplay: read("g") };
+}
+
+function writeRects(rects) {
+  const write = (p, r) => {
+    $(p + "x").value = Math.round(r.x * 100);
+    $(p + "y").value = Math.round(r.y * 100);
+    $(p + "w").value = Math.round(r.w * 100);
+    $(p + "h").value = Math.round(r.h * 100);
   };
-}
-
-function writeRect(rect) {
-  $("rx").value = Math.round(rect.x * 100);
-  $("ry").value = Math.round(rect.y * 100);
-  $("rw").value = Math.round(rect.w * 100);
-  $("rh").value = Math.round(rect.h * 100);
+  write("w", rects.webcam);
+  write("g", rects.gameplay);
 }
 
 function renderClips(clips) {
@@ -127,10 +141,10 @@ function render(state) {
     previewRequested = false;
     previewImg = null;
     $("ch").textContent = state.channel || "-";
-    writeRect(state.rect);
+    writeRects(state.rects);
     drawPreview();
   }
-  if (!rectDirty && document.activeElement?.tagName !== "INPUT") writeRect(state.rect);
+  if (!rectDirty && document.activeElement?.tagName !== "INPUT") writeRects(state.rects);
 
   if (state.status === "live" && !previewRequested) {
     previewRequested = true;
@@ -167,10 +181,11 @@ $("start").onclick = () => post("/api/start", { url: $("url").value });
 $("stop").onclick = () => post("/api/stop");
 $("refresh").onclick = loadPreview;
 $("save").onclick = async () => {
-  await post("/api/rect", { channel: currentChannel || "default", rect: readRect() });
+  const rects = readRects();
+  await post("/api/rect", { channel: currentChannel || "default", ...rects });
   rectDirty = false;
 };
-["rx", "ry", "rw", "rh"].forEach((id) => {
+["wx", "wy", "ww", "wh", "gx", "gy", "gw", "gh"].forEach((id) => {
   $(id).addEventListener("input", () => {
     rectDirty = true;
     drawPreview();

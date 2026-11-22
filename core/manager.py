@@ -13,9 +13,12 @@ from .clipper import pick_segments, render
 from .detector import SpikeDetector
 from .recorder import Recorder, resolve
 
-DEFAULT_RECT = {"x": 0.68, "y": 0.03, "w": 0.29, "h": 0.40}
-DEFAULT_CONFIG = {"pre": 20, "post": 10, "cooldown": 60, "window": 10,
-                  "baseline_window": 300, "k": 3, "min_rate": 8}
+DEFAULT_WEBCAM = {"x": 0.68, "y": 0.03, "w": 0.29, "h": 0.40}
+DEFAULT_GAMEPLAY = {"x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0}
+DEFAULT_CONFIG = {"pre": 20, "post": 30, "cooldown": 60, "window": 10,
+                  "baseline_window": 300, "k": 3, "min_rate": 8,
+                  "max_clip": 50, "subtitles": True,
+                  "subtitle_model": "small", "subtitle_language": None}
 
 
 class Manager:
@@ -57,7 +60,7 @@ class Manager:
             "clips_scheduled": self.clips_scheduled,
             "clips": self.clips[-50:],
             "logs": list(self.logs)[-60:],
-            "rect": self.rect_for(self.channel),
+            "rects": self.rects_for(self.channel),
             **snap,
         }
 
@@ -66,19 +69,30 @@ class Manager:
 
     # ---- channel rect ----
 
-    def rect_for(self, channel: str) -> dict:
-        data = self._load_json(self.channels_path, {})
-        rect = data.get(channel) or data.get(channel.lower()) or DEFAULT_RECT
-        return {k: float(rect.get(k, DEFAULT_RECT[k])) for k in DEFAULT_RECT}
-
-    def save_rect(self, channel: str, rect: dict) -> None:
-        data = self._load_json(self.channels_path, {})
-        clean = {k: min(max(float(rect.get(k, DEFAULT_RECT[k])), 0.0), 1.0) for k in DEFAULT_RECT}
+    @staticmethod
+    def _clean(rect: dict, default: dict) -> dict:
+        clean = {k: min(max(float(rect.get(k, default[k])), 0.0), 1.0) for k in default}
         clean["w"] = min(clean["w"], 1.0 - clean["x"])
         clean["h"] = min(clean["h"], 1.0 - clean["y"])
+        return clean
+
+    def rects_for(self, channel: str) -> dict:
+        data = self._load_json(self.channels_path, {})
+        entry = data.get(channel) or data.get(channel.lower()) or {}
+        if "webcam" in entry or "gameplay" in entry:
+            return {"webcam": self._clean(entry.get("webcam", {}), DEFAULT_WEBCAM),
+                    "gameplay": self._clean(entry.get("gameplay", {}), DEFAULT_GAMEPLAY)}
+        # format lama: rect datar = webcam
+        return {"webcam": self._clean(entry, DEFAULT_WEBCAM),
+                "gameplay": dict(DEFAULT_GAMEPLAY)}
+
+    def save_rects(self, channel: str, webcam: dict, gameplay: dict) -> None:
+        data = self._load_json(self.channels_path, {})
+        clean = {"webcam": self._clean(webcam or {}, DEFAULT_WEBCAM),
+                 "gameplay": self._clean(gameplay or {}, DEFAULT_GAMEPLAY)}
         data[channel or "default"] = clean
         self.channels_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-        self.log(f"rect {channel}: {clean}")
+        self.log(f"rect {channel}: webcam {clean['webcam']} gameplay {clean['gameplay']}")
 
     @staticmethod
     def _load_json(path: Path, default):
@@ -175,9 +189,11 @@ class Manager:
         if self.recorder.outdir is None:
             return
         try:
-            t0 = max(self.recorder.stream_time(spike_wall) - self.config["pre"], 0.0)
-            t1 = self.recorder.stream_time(spike_wall) + self.config["post"]
-            while time.time() < spike_wall + self.config["post"] + 2:
+            pre = self.config["pre"]
+            post = min(self.config["post"], max(self.config["max_clip"] - pre, 1))
+            t0 = max(self.recorder.stream_time(spike_wall) - pre, 0.0)
+            t1 = self.recorder.stream_time(spike_wall) + post
+            while time.time() < spike_wall + post + 2:
                 time.sleep(0.5)
             names = pick_segments(self.recorder.segments(), t0, t1)
             if not names:
@@ -185,7 +201,13 @@ class Manager:
                 return
             safe = re.sub(r"[^A-Za-z0-9_-]+", "_", self.channel)[:40] or "channel"
             out = self.clips_dir / f"{safe}_{int(spike_wall)}.mp4"
-            render(names, out, self.rect_for(self.channel), self.buffer_dir, self.log)
+            subtitle_opts = {
+                "enabled": bool(self.config.get("subtitles", True)),
+                "model": self.config.get("subtitle_model", "small"),
+                "language": self.config.get("subtitle_language"),
+            }
+            render(names, out, self.rects_for(self.channel), self.buffer_dir, self.log,
+                   subtitle_opts)
             score = rate / base if base > 0 else rate / self.config["min_rate"]
             self.clips.append({
                 "file": out.name,
