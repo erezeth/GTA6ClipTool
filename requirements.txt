@@ -1,0 +1,3 @@
+yt-dlp>=2026.10.26
+fastapi>=0.165
+uvicorn>=0.38
