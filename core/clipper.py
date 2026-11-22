@@ -4,13 +4,13 @@ from __future__ import annotations
 import subprocess
 import threading
 from pathlib import Path
+from typing import Callable
 
-from .subtitles import group_words, transcribe, write_ass
+from .subtitles import SUBTITLES_ENABLED, group_words, transcribe, write_ass
 
 OUT_W, OUT_H = 1080, 1920
-FACE_H = 1000
-SAFE_H = 220
-GAME_H = OUT_H - FACE_H - SAFE_H
+FACE_H = 550
+GAME_H = OUT_H - FACE_H
 
 _nvenc: bool | None = None
 _nvenc_lock = threading.Lock()
@@ -21,8 +21,10 @@ def has_nvenc() -> bool:
     with _nvenc_lock:
         if _nvenc is None:
             try:
-                out = subprocess.run(["ffmpeg", "-hide_banner", "-encoders"],
-                                     capture_output=True, text=True, timeout=30).stdout
+                out = subprocess.run(
+                    ["ffmpeg", "-hide_banner", "-encoders"],
+                    capture_output=True, text=True, timeout=30
+                ).stdout
                 _nvenc = "h264_nvenc" in out
             except Exception:
                 _nvenc = False
@@ -32,11 +34,13 @@ def has_nvenc() -> bool:
 def _clamp_rect(src_w: int, src_h: int, rect: dict,
                 default: tuple[float, float, float, float] = (0.0, 0.0, 1.0, 1.0)
                 ) -> tuple[int, int, int, int]:
+    """Pastikan crop (x, y, w, h) tidak keluar dari resolusi video."""
     dx, dy, dw, dh = default
     x = min(max(float(rect.get("x", dx)), 0.0), 1.0)
     y = min(max(float(rect.get("y", dy)), 0.0), 1.0)
     w = min(max(float(rect.get("w", dw)), 0.0), 1.0 - x)
     h = min(max(float(rect.get("h", dh)), 0.0), 1.0 - y)
+
     px, py = round(x * src_w), round(y * src_h)
     pw, ph = round(w * src_w), round(h * src_h)
     pw = max(min(pw, src_w - px), 16)
@@ -44,10 +48,10 @@ def _clamp_rect(src_w: int, src_h: int, rect: dict,
     return px, py, pw, ph
 
 
-def build_filter(src_w: int, src_h: int, webcam: dict, gameplay: dict,
-                 extra: str = "") -> str:
+def build_filter(src_w: int, src_h: int, webcam: dict, gameplay: dict, extra: str = "") -> str:
     fx, fy, fw, fh = _clamp_rect(src_w, src_h, webcam, (0.68, 0.03, 0.29, 0.40))
     gx, gy, gw, gh = _clamp_rect(src_w, src_h, gameplay)
+
     return (
         f"[0:v]setpts=PTS-STARTPTS,split=2[g][f];"
         f"[f]crop={fw}:{fh}:{fx}:{fy},"
@@ -69,7 +73,8 @@ def _first_pts(path: Path, stream: str) -> float | None:
         ["ffprobe", "-v", "error", "-select_streams", stream,
          "-show_entries", "packet=pts_time", "-of", "csv=p=0",
          "-read_intervals", "%+#1", str(path)],
-        capture_output=True, text=True).stdout.strip()
+        capture_output=True, text=True
+    ).stdout.strip()
     try:
         return float(out.split(",")[0])
     except (ValueError, IndexError):
@@ -80,19 +85,17 @@ def _has_audio(path: Path) -> bool:
     out = subprocess.run(
         ["ffprobe", "-v", "error", "-select_streams", "a",
          "-show_entries", "stream=index", "-of", "csv=p=0", str(path)],
-        capture_output=True, text=True).stdout.strip()
+        capture_output=True, text=True
+    ).stdout.strip()
     return bool(out)
 
 
 def _audio_chain(first_segment: Path) -> str:
-    """Koreksi audio yang datang terlambat/terlalu awal dari dua input HLS terpisah.
-
-    shortcut: hanya offset awal segmen pertama; kalau audio masih meleset di
-    tengah klip, perlu koreksi per segmen.
-    """
+    """Selaraskan audio dan video yang datang dari dua input HLS terpisah."""
     vstart = _first_pts(first_segment, "v:0")
     astart = _first_pts(first_segment, "a:0")
     delta = (astart - vstart) if vstart is not None and astart is not None else 0.0
+
     if delta > 0.05:
         return f"atrim=start={delta:.3f},asetpts=PTS-STARTPTS,aresample=async=1:first_pts=0"
     if delta < -0.05:
@@ -106,7 +109,8 @@ def _probe_size(segments: list[str], workdir: Path) -> tuple[int, int]:
         ["ffprobe", "-v", "error", "-select_streams", "v:0",
          "-show_entries", "stream=width,height", "-of", "csv=p=0",
          str(workdir / segments[0])],
-        capture_output=True, text=True).stdout.strip()
+        capture_output=True, text=True
+    ).stdout.strip()
     try:
         w, h = (int(v) for v in out.split(",")[:2])
         return w, h
@@ -115,9 +119,11 @@ def _probe_size(segments: list[str], workdir: Path) -> tuple[int, int]:
 
 
 def _burn_subtitles(list_file: Path, workdir: Path, out_stem: str,
-                    opts: dict, audio_filter: str, log) -> str:
+                    opts: dict, audio_filter: str, log: Callable[[str], None]) -> str:
+    """Buat file .ass dan kembalikan potongan filter-nya. String kosong jika gagal."""
     wav = workdir / f"sub_{out_stem}.wav"
     ass_name = f"sub_{out_stem}.ass"
+
     try:
         cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
                "-f", "concat", "-safe", "0", "-i", str(list_file),
@@ -125,12 +131,15 @@ def _burn_subtitles(list_file: Path, workdir: Path, out_stem: str,
         if audio_filter:
             cmd += ["-af", audio_filter]
         cmd.append(str(wav))
+
         subprocess.run(cmd, check=True, capture_output=True)
         words = transcribe(wav, opts.get("model", "small"), opts.get("language"))
         chunks = group_words(words)
         if not chunks:
             return ""
-        write_ass(chunks, workdir / ass_name)
+
+        override = {k: opts[k] for k in ("font_size", "pos_y") if k in opts}
+        write_ass(chunks, workdir / ass_name, **override)
         log(f"subtitle: {len(chunks)} baris")
         return f",ass={ass_name}"
     except Exception as exc:
@@ -141,12 +150,14 @@ def _burn_subtitles(list_file: Path, workdir: Path, out_stem: str,
 
 
 def render(segments: list[str], out_path: Path, rects: dict, workdir: Path,
-           log=print, subtitle_opts: dict | None = None,
+           log: Callable[[str], None] = print, subtitle_opts: dict | None = None,
            max_duration: float | None = None) -> Path:
     stem = out_path.stem
     list_file = workdir / f"concat_{stem}.txt"
     list_file.write_text(
-        "".join(f"file '{(workdir / s).as_posix()}'\n" for s in segments), encoding="utf-8")
+        "".join(f"file '{(workdir / s).as_posix()}'\n" for s in segments),
+        encoding="utf-8"
+    )
 
     src_w, src_h = _probe_size(segments, workdir)
     first = workdir / segments[0]
@@ -154,7 +165,7 @@ def render(segments: list[str], out_path: Path, rects: dict, workdir: Path,
     audio_filter = _audio_chain(first) if has_audio else ""
 
     extra = ""
-    if has_audio and subtitle_opts and subtitle_opts.get("enabled"):
+    if SUBTITLES_ENABLED and has_audio and subtitle_opts and subtitle_opts.get("enabled"):
         extra = _burn_subtitles(list_file, workdir, stem, subtitle_opts, audio_filter, log)
 
     video_filter = build_filter(src_w, src_h, rects.get("webcam", {}),
@@ -171,16 +182,21 @@ def render(segments: list[str], out_path: Path, rects: dict, workdir: Path,
     cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
            "-f", "concat", "-safe", "0", "-i", str(list_file),
            "-filter_complex", ";".join(filters), "-map", "[v]"]
+
     if has_audio:
         cmd += ["-map", "[a]", "-c:a", "aac", "-b:a", "128k"]
+
     if max_duration:
         cmd += ["-t", f"{max_duration:g}"]
+
     cmd += [*enc, "-movflags", "+faststart", str(out_path)]
 
     log("render: " + " ".join(cmd))
+
     res = subprocess.run(cmd, capture_output=True, text=True, cwd=workdir)
     if res.returncode != 0:
         raise RuntimeError((res.stderr or "").strip()[-800:] or "ffmpeg gagal")
+
     list_file.unlink(missing_ok=True)
     (workdir / f"sub_{stem}.ass").unlink(missing_ok=True)
     return out_path
