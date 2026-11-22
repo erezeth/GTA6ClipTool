@@ -1,3 +1,4 @@
+import core.clipper as clipper
 from core.clipper import build_filter, pick_segments
 
 WEBCAM = {"x": 0.68, "y": 0.03, "w": 0.29, "h": 0.40}
@@ -28,6 +29,32 @@ def test_rect_clamped_inside_frame():
 def test_rect_never_smaller_than_16px():
     f = build_filter(1920, 1080, {"x": 0.5, "y": 0.5, "w": 0.0, "h": 0.0}, GAMEPLAY)
     assert "crop=16:16:960:540" in f
+
+
+def test_build_filter_burns_subtitles_before_output():
+    f = build_filter(1920, 1080, WEBCAM, GAMEPLAY, ",ass=sub.ass")
+    assert "pad=1080:1920:0:0:black,ass=sub.ass[v]" in f
+
+
+def test_render_caps_duration(tmp_path, monkeypatch):
+    (tmp_path / "seg_000000.ts").write_bytes(b"")
+    calls = []
+
+    class Result:
+        returncode = 0
+        stdout = "1920,1080"
+        stderr = ""
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return Result()
+
+    monkeypatch.setattr(clipper.subprocess, "run", fake_run)
+    monkeypatch.setattr(clipper, "has_nvenc", lambda: False)
+    clipper.render(["seg_000000.ts"], tmp_path / "out.mp4", {}, tmp_path,
+                   max_duration=50)
+    cmd = calls[-1]
+    assert cmd[cmd.index("-t") + 1] == "50"
 
 
 def test_pick_segments_covers_window():

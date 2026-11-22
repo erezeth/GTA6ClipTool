@@ -44,18 +44,19 @@ def _clamp_rect(src_w: int, src_h: int, rect: dict,
     return px, py, pw, ph
 
 
-def build_filter(src_w: int, src_h: int, webcam: dict, gameplay: dict) -> str:
+def build_filter(src_w: int, src_h: int, webcam: dict, gameplay: dict,
+                 extra: str = "") -> str:
     fx, fy, fw, fh = _clamp_rect(src_w, src_h, webcam, (0.68, 0.03, 0.29, 0.40))
     gx, gy, gw, gh = _clamp_rect(src_w, src_h, gameplay)
     return (
-        f"[0:v]split=2[g][f];"
+        f"[0:v]setpts=PTS-STARTPTS,split=2[g][f];"
         f"[f]crop={fw}:{fh}:{fx}:{fy},"
         f"scale={OUT_W}:{FACE_H}:force_original_aspect_ratio=increase,"
         f"crop={OUT_W}:{FACE_H},setsar=1[face];"
         f"[g]crop={gw}:{gh}:{gx}:{gy},"
         f"scale={OUT_W}:{GAME_H}:force_original_aspect_ratio=increase,"
         f"crop={OUT_W}:{GAME_H},setsar=1[game];"
-        f"[face][game]vstack=inputs=2,pad={OUT_W}:{OUT_H}:0:0:black[v]"
+        f"[face][game]vstack=inputs=2,pad={OUT_W}:{OUT_H}:0:0:black{extra}[v]"
     )
 
 
@@ -84,7 +85,11 @@ def _has_audio(path: Path) -> bool:
 
 
 def _audio_chain(first_segment: Path) -> str:
-    """Koreksi audio yang datang terlambat/terlalu awal dari dua input HLS terpisah."""
+    """Koreksi audio yang datang terlambat/terlalu awal dari dua input HLS terpisah.
+
+    shortcut: hanya offset awal segmen pertama; kalau audio masih meleset di
+    tengah klip, perlu koreksi per segmen.
+    """
     vstart = _first_pts(first_segment, "v:0")
     astart = _first_pts(first_segment, "a:0")
     delta = (astart - vstart) if vstart is not None and astart is not None else 0.0
@@ -109,16 +114,18 @@ def _probe_size(segments: list[str], workdir: Path) -> tuple[int, int]:
         return 1920, 1080
 
 
-def _burn_subtitles(segments: list[str], list_file: Path, workdir: Path,
-                    out_stem: str, opts: dict, log) -> str:
+def _burn_subtitles(list_file: Path, workdir: Path, out_stem: str,
+                    opts: dict, audio_filter: str, log) -> str:
     wav = workdir / f"sub_{out_stem}.wav"
     ass_name = f"sub_{out_stem}.ass"
     try:
-        subprocess.run(
-            ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-             "-f", "concat", "-safe", "0", "-i", str(list_file),
-             "-vn", "-ac", "1", "-ar", "16000", str(wav)],
-            check=True, capture_output=True)
+        cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+               "-f", "concat", "-safe", "0", "-i", str(list_file),
+               "-vn", "-ac", "1", "-ar", "16000"]
+        if audio_filter:
+            cmd += ["-af", audio_filter]
+        cmd.append(str(wav))
+        subprocess.run(cmd, check=True, capture_output=True)
         words = transcribe(wav, opts.get("model", "small"), opts.get("language"))
         chunks = group_words(words)
         if not chunks:
@@ -134,7 +141,8 @@ def _burn_subtitles(segments: list[str], list_file: Path, workdir: Path,
 
 
 def render(segments: list[str], out_path: Path, rects: dict, workdir: Path,
-           log=print, subtitle_opts: dict | None = None) -> Path:
+           log=print, subtitle_opts: dict | None = None,
+           max_duration: float | None = None) -> Path:
     stem = out_path.stem
     list_file = workdir / f"concat_{stem}.txt"
     list_file.write_text(
@@ -143,14 +151,17 @@ def render(segments: list[str], out_path: Path, rects: dict, workdir: Path,
     src_w, src_h = _probe_size(segments, workdir)
     first = workdir / segments[0]
     has_audio = _has_audio(first)
+    audio_filter = _audio_chain(first) if has_audio else ""
 
-    video_filter = build_filter(src_w, src_h, rects.get("webcam", {}), rects.get("gameplay", {}))
-    if subtitle_opts and subtitle_opts.get("enabled"):
-        video_filter += _burn_subtitles(segments, list_file, workdir, stem, subtitle_opts, log)
+    extra = ""
+    if has_audio and subtitle_opts and subtitle_opts.get("enabled"):
+        extra = _burn_subtitles(list_file, workdir, stem, subtitle_opts, audio_filter, log)
 
+    video_filter = build_filter(src_w, src_h, rects.get("webcam", {}),
+                                rects.get("gameplay", {}), extra)
     filters = [video_filter]
     if has_audio:
-        filters.append(f"[0:a]{_audio_chain(first)}[a]")
+        filters.append(f"[0:a]{audio_filter}[a]")
 
     if has_nvenc():
         enc = ["-c:v", "h264_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", "21", "-b:v", "0"]
@@ -162,6 +173,8 @@ def render(segments: list[str], out_path: Path, rects: dict, workdir: Path,
            "-filter_complex", ";".join(filters), "-map", "[v]"]
     if has_audio:
         cmd += ["-map", "[a]", "-c:a", "aac", "-b:a", "128k"]
+    if max_duration:
+        cmd += ["-t", f"{max_duration:g}"]
     cmd += [*enc, "-movflags", "+faststart", str(out_path)]
 
     log("render: " + " ".join(cmd))

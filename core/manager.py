@@ -207,7 +207,7 @@ class Manager:
                 "language": self.config.get("subtitle_language"),
             }
             render(names, out, self.rects_for(self.channel), self.buffer_dir, self.log,
-                   subtitle_opts)
+                   subtitle_opts, max_duration=self.config["max_clip"])
             score = rate / base if base > 0 else rate / self.config["min_rate"]
             self.clips.append({
                 "file": out.name,
