@@ -8,6 +8,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
 from core.manager import Manager
 
@@ -16,6 +17,7 @@ STATIC = ROOT / "static"
 manager = Manager(ROOT)
 
 app = FastAPI(title="Live Clipper")
+app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
 
 @app.get("/")

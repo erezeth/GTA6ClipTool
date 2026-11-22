@@ -1,3 +1,4 @@
-INFO:     127.0.0.1:57989 - "GET /api/state HTTP/1.1" 200 OK
-INFO:     127.0.0.1:57989 - "GET / HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64289 - "GET /api/events HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64297 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64297 - "GET /static/style.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64297 - "GET /static/app.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64297 - "GET /api/state HTTP/1.1" 200 OK
