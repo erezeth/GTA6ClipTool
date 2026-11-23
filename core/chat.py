@@ -9,6 +9,19 @@ import time
 from pathlib import Path
 
 
+def _offset_seconds(obj: dict) -> float | None:
+    """Live: offset di level atas. Replay: di dalam replayChatItemAction."""
+    ms = obj.get("videoOffsetTimeMsec")
+    if ms is None:
+        replay = obj.get("replayChatItemAction")
+        if isinstance(replay, dict):
+            ms = replay.get("videoOffsetTimeMsec")
+    try:
+        return int(ms) / 1000
+    except (TypeError, ValueError):
+        return None
+
+
 def parse_messages(lines: list[bytes]) -> list[float]:
     """Offset video (detik) untuk tiap pesan chat. Abaikan ticker dan baris rusak."""
     offsets = []
@@ -16,10 +29,33 @@ def parse_messages(lines: list[bytes]) -> list[float]:
         if b'"addChatItemAction"' not in line:
             continue
         try:
-            obj = json.loads(line)
-            offsets.append(int(obj["videoOffsetTimeMsec"]) / 1000)
-        except (ValueError, KeyError, TypeError):
+            seconds = _offset_seconds(json.loads(line))
+        except (ValueError, AttributeError):
             continue
+        if seconds is not None:
+            offsets.append(seconds)
+    return offsets
+
+
+def download_chat(url: str, outdir: Path) -> Path:
+    """Unduh seluruh chat replay (stream yang sudah selesai) jadi satu file JSONL."""
+    outdir.mkdir(parents=True, exist_ok=True)
+    res = subprocess.run(
+        [sys.executable, "-m", "yt_dlp", "--skip-download", "--write-subs",
+         "--sub-langs", "live_chat", "--no-warnings", "--no-playlist",
+         "-o", str(outdir / "chat.%(ext)s"), url],
+        capture_output=True, text=True, timeout=1800)
+    path = outdir / "chat.live_chat.json"
+    if res.returncode != 0 or not path.exists():
+        raise RuntimeError((res.stderr or "").strip()[-500:] or "chat replay tidak tersedia")
+    return path
+
+
+def read_offsets(path: Path) -> list[float]:
+    offsets = []
+    with path.open("rb") as fh:
+        for line in fh:
+            offsets.extend(parse_messages([line]))
     return offsets
 
 

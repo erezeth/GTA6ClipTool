@@ -130,7 +130,9 @@ def _burn_subtitles(list_file: Path, workdir: Path, out_stem: str,
         chunks = group_words(words)
         if not chunks:
             return ""
-        write_ass(chunks, workdir / ass_name)
+        write_ass(chunks, workdir / ass_name,
+                  font_size=int(opts.get("size", 76)),
+                  pos_x=float(opts.get("x", 0.5)))
         log(f"subtitle: {len(chunks)} baris")
         return f",ass={ass_name}"
     except Exception as exc:

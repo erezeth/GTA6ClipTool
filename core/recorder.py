@@ -21,6 +21,7 @@ def resolve(url: str) -> dict:
         "id": info.get("id", ""),
         "title": info.get("title", ""),
         "channel": info.get("channel") or info.get("uploader") or "unknown",
+        "live_status": info.get("live_status", ""),
         "is_live": info.get("live_status") in ("is_live", "is_upcoming") or bool(info.get("is_live")),
     }
 
@@ -36,6 +37,22 @@ def _stream_urls(url: str) -> list[str]:
     if not urls:
         raise RuntimeError("stream URL kosong")
     return urls[:2]
+
+
+def download_section(url: str, start: float, end: float, out: Path) -> Path:
+    """Unduh hanya potongan [start, end] dari replay (detik video)."""
+    res = subprocess.run(
+        [*YTDLP, "--no-warnings", "--no-playlist",
+         "--download-sections", f"*{start:g}-{end:g}",
+         "--force-keyframes-at-cuts", "--merge-output-format", "mp4",
+         "-f", "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b",
+         "-o", str(out), url],
+        capture_output=True, text=True, timeout=600)
+    path = out if out.exists() else next(
+        (p for p in out.parent.glob(out.stem + ".*") if p.is_file()), None)
+    if res.returncode != 0 or path is None:
+        raise RuntimeError((res.stderr or "").strip()[-500:] or "gagal unduh potongan video")
+    return path
 
 
 class Recorder:

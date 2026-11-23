@@ -126,8 +126,8 @@ function render(state) {
   $("scheduled").textContent = state.clips_scheduled;
   $("log").textContent = state.logs.join("\n");
   $("log").scrollTop = $("log").scrollHeight;
-  $("start").disabled = state.status === "starting" || state.status === "live";
-  $("stop").disabled = state.status === "idle" || state.status === "error";
+  $("start").disabled = ["starting", "live", "vod"].includes(state.status);
+  $("stop").disabled = ["idle", "error", "done"].includes(state.status);
 
   history.push(state.rate);
   if (history.length > MAX_POINTS) history.shift();
@@ -144,7 +144,11 @@ function render(state) {
     writeRects(state.rects);
     drawPreview();
   }
-  if (!rectDirty && document.activeElement?.tagName !== "INPUT") writeRects(state.rects);
+  if (!rectDirty && document.activeElement?.tagName !== "INPUT") {
+    writeRects(state.rects);
+    $("subx").value = Math.round(state.subtitle.x * 100);
+    $("subsize").value = state.subtitle.size;
+  }
 
   if (state.status === "live" && !previewRequested) {
     previewRequested = true;
@@ -185,6 +189,10 @@ $("save").onclick = async () => {
   await post("/api/rect", { channel: currentChannel || "default", ...rects });
   rectDirty = false;
 };
+$("savesub").onclick = () => post("/api/config", {
+  subtitle_x: (+$("subx").value || 0) / 100,
+  subtitle_size: +$("subsize").value || 76,
+});
 ["wx", "wy", "ww", "wh", "gx", "gy", "gw", "gh"].forEach((id) => {
   $(id).addEventListener("input", () => {
     rectDirty = true;

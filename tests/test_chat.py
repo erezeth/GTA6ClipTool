@@ -16,3 +16,13 @@ def test_parse_messages_ignores_tickers_and_viewers():
 
 def test_parse_messages_empty():
     assert parse_messages([]) == []
+
+
+def test_parse_messages_replay_nested_offset():
+    lines = [
+        b'{"replayChatItemAction":{"videoOffsetTimeMsec":"12345000","actions":['
+        b'{"addChatItemAction":{"item":{"liveChatTextMessageRenderer":{}}}}]}}',
+        b'{"replayChatItemAction":{"videoOffsetTimeMsec":"isLive","actions":['
+        b'{"addChatItemAction":{"item":{"liveChatTextMessageRenderer":{}}}}]}}',
+    ]
+    assert parse_messages(lines) == [12345.0]

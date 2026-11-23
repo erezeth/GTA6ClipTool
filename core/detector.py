@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import statistics
-from collections import deque
+from collections import Counter, deque
 
 
 class SpikeDetector:
@@ -60,3 +60,16 @@ class SpikeDetector:
             "threshold": round(self.threshold(base), 2),
             "last_spike": self.last_spike,
         }
+
+
+def find_spikes(offsets: list[float], **cfg) -> list[tuple[float, float, float]]:
+    """Deteksi spike dari offset video chat replay: [(detik, rate, baseline)]."""
+    detector = SpikeDetector(**cfg)
+    counts = Counter(int(offset) for offset in offsets)
+    hits = []
+    for second in sorted(counts):
+        detector.add(second, counts[second])
+        hit = detector.check(second)
+        if hit:
+            hits.append((float(second), *hit))
+    return hits

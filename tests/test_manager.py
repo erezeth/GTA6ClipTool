@@ -56,3 +56,38 @@ def test_spike_schedules_clip_without_recorder(tmp_path):
         for _ in range(30):
             m._on_chat(200.0 + i)
     assert m.clips_scheduled == 1
+
+
+def test_save_config_clamps_and_persists(tmp_path):
+    m = Manager(tmp_path)
+    m.save_config({"subtitle_x": 2, "subtitle_size": 5000})
+    assert m.config["subtitle_x"] == 1.0
+    assert m.config["subtitle_size"] == 200
+    assert m.state()["subtitle"] == {"x": 1.0, "size": 200}
+    assert Manager(tmp_path).config["subtitle_x"] == 1.0
+
+
+def test_vod_pipeline_renders_each_spike(tmp_path, monkeypatch):
+    m = Manager(tmp_path)
+    m.url = "https://example.com/replay"
+    chat = tmp_path / "chat.live_chat.json"
+    chat.write_bytes(b"")
+    monkeypatch.setattr("core.manager.download_chat", lambda url, outdir: chat)
+    monkeypatch.setattr("core.manager.read_offsets", lambda path: [120.0])
+    monkeypatch.setattr("core.manager.find_spikes",
+                        lambda offsets, **cfg: [(120.0, 10.0, 2.0)])
+
+    def fake_section(url, start, end, out):
+        out.write_bytes(b"x")
+        return out
+
+    monkeypatch.setattr("core.manager.download_section", fake_section)
+    monkeypatch.setattr("core.manager.render", lambda *args, **kwargs: None)
+
+    m._run_vod({"title": "Replay", "channel": "ch"}, m._job)
+
+    assert m.status == "done"
+    assert m.clips_scheduled == 1
+    assert m.clips[0]["file"] == "ch_120.mp4"
+    assert m.clips[0]["at"] == "video 00:02:00"
+    assert not list(m.buffer_dir.glob("sec_*.mp4"))

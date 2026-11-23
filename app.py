@@ -57,6 +57,12 @@ def save_rect(body: dict):
     return {"ok": True}
 
 
+@app.post("/api/config")
+def save_config(body: dict):
+    manager.save_config(body)
+    return {"ok": True}
+
+
 @app.get("/api/preview")
 def preview():
     segment = manager.recorder.latest_segment()

@@ -8,17 +8,22 @@ import time
 from collections import deque
 from pathlib import Path
 
-from .chat import ChatWatcher
+from .chat import ChatWatcher, download_chat, read_offsets
 from .clipper import pick_segments, render
-from .detector import SpikeDetector
-from .recorder import Recorder, resolve
+from .detector import SpikeDetector, find_spikes
+from .recorder import Recorder, download_section, resolve
 
 DEFAULT_WEBCAM = {"x": 0.68, "y": 0.03, "w": 0.29, "h": 0.40}
 DEFAULT_GAMEPLAY = {"x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0}
 DEFAULT_CONFIG = {"pre": 20, "post": 30, "cooldown": 60, "window": 10,
                   "baseline_window": 300, "k": 3, "min_rate": 8,
                   "max_clip": 50, "subtitles": True,
-                  "subtitle_model": "small", "subtitle_language": None}
+                  "subtitle_model": "small", "subtitle_language": None,
+                  "subtitle_x": 0.5, "subtitle_size": 76}
+
+
+def _fmt_time(seconds: float) -> str:
+    return time.strftime("%H:%M:%S", time.gmtime(max(seconds, 0)))
 
 
 class Manager:
@@ -27,13 +32,14 @@ class Manager:
         self.clips_dir = self.root / "clips"
         self.buffer_dir = self.root / "buffer"
         self.channels_path = self.root / "channels.json"
-        self.config = self._load_json(self.root / "config.json", DEFAULT_CONFIG)
+        self.config = dict(self._load_json(self.root / "config.json", DEFAULT_CONFIG))
         self.status = "idle"
         self.error: str | None = None
         self.url = ""
         self.title = ""
         self.channel = ""
         self.started_wall: float | None = None
+        self.vod_messages = 0
         self.detector = SpikeDetector(**{k: self.config[k] for k in
                                          ("window", "baseline_window", "k", "min_rate", "cooldown")})
         self.recorder = Recorder()
@@ -42,6 +48,7 @@ class Manager:
         self.logs: deque[str] = deque(maxlen=200)
         self.clips_scheduled = 0
         self._stop = threading.Event()
+        self._job = 0
 
     # ---- state ----
 
@@ -55,12 +62,14 @@ class Manager:
             "title": self.title,
             "channel": self.channel,
             "uptime": round(now - self.started_wall) if self.started_wall else 0,
-            "messages": self.chat.messages_seen if self.chat else 0,
+            "messages": self.chat.messages_seen if self.chat else self.vod_messages,
             "chat_started": bool(self.chat and self.chat.started),
             "clips_scheduled": self.clips_scheduled,
             "clips": self.clips[-50:],
             "logs": list(self.logs)[-60:],
             "rects": self.rects_for(self.channel),
+            "subtitle": {"x": self.config.get("subtitle_x", 0.5),
+                         "size": self.config.get("subtitle_size", 76)},
             **snap,
         }
 
@@ -94,6 +103,16 @@ class Manager:
         self.channels_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
         self.log(f"rect {channel}: webcam {clean['webcam']} gameplay {clean['gameplay']}")
 
+    def save_config(self, patch: dict) -> None:
+        if "subtitle_x" in patch:
+            self.config["subtitle_x"] = min(max(float(patch["subtitle_x"]), 0.0), 1.0)
+        if "subtitle_size" in patch:
+            self.config["subtitle_size"] = min(max(int(patch["subtitle_size"]), 20), 200)
+        (self.root / "config.json").write_text(
+            json.dumps(self.config, indent=2), encoding="utf-8")
+        self.log(f"subtitle: x {self.config.get('subtitle_x')} "
+                 f"size {self.config.get('subtitle_size')}")
+
     @staticmethod
     def _load_json(path: Path, default):
         try:
@@ -104,23 +123,31 @@ class Manager:
     # ---- lifecycle ----
 
     def start(self, url: str) -> dict:
-        if self.status in ("starting", "live"):
+        if self.status in ("starting", "live", "vod"):
             return {"ok": False, "error": "stream lain sedang aktif"}
         if not url.strip():
             return {"ok": False, "error": "URL kosong"}
         self.url = url.strip()
         self.status = "starting"
         self.error = None
+        self.vod_messages = 0
+        self.clips_scheduled = 0
         self._stop.clear()
-        threading.Thread(target=self._start_worker, daemon=True).start()
+        self._job += 1
+        threading.Thread(target=self._start_worker, args=(self._job,), daemon=True).start()
         return {"ok": True}
 
-    def _start_worker(self) -> None:
+    def _start_worker(self, job: int) -> None:
         try:
             self.log("resolve URL...")
             info = resolve(self.url)
+            if self._job != job:
+                return
+            if info.get("live_status") == "was_live":
+                self._run_vod(info, job)
+                return
             if not info["is_live"]:
-                raise RuntimeError("URL bukan live stream aktif")
+                raise RuntimeError("URL bukan live atau replay live")
             self.title = info["title"]
             self.channel = info["channel"]
             self.log(f"live: {self.title} ({self.channel})")
@@ -143,9 +170,94 @@ class Manager:
             self.log("rekaman jalan")
             threading.Thread(target=self._monitor_loop, daemon=True).start()
         except Exception as exc:
-            self.status = "error"
-            self.error = str(exc)
-            self.log(f"error: {exc}")
+            if self._job == job:
+                self.status = "error"
+                self.error = str(exc)
+                self.log(f"error: {exc}")
+
+    def _run_vod(self, info: dict, job: int) -> None:
+        """Replay live yang sudah selesai: chat dulu, deteksi, unduh hanya bagian spike."""
+        self.status = "vod"
+        self.title = info["title"]
+        self.channel = info["channel"]
+        self.chat = None
+        self.started_wall = time.time()
+        self.log(f"replay: {self.title} ({self.channel})")
+        self.buffer_dir.mkdir(parents=True, exist_ok=True)
+        self.clips_dir.mkdir(parents=True, exist_ok=True)
+        for old in self.buffer_dir.glob("sec_*.mp4"):
+            old.unlink(missing_ok=True)
+        for old in self.buffer_dir.glob("chat.live_chat.json*"):
+            old.unlink(missing_ok=True)
+        url = self.url
+        video_id = re.sub(r"[^A-Za-z0-9_-]+", "_", info.get("id", ""))[:40]
+
+        self.log("download chat replay...")
+        chat_path = download_chat(url, self.buffer_dir)
+        offsets = read_offsets(chat_path)
+        chat_path.unlink(missing_ok=True)
+        self.vod_messages = len(offsets)
+        if self._job != job or self._stop.is_set():
+            return
+        if not offsets:
+            raise RuntimeError("chat replay tidak tersedia")
+        self.log(f"chat: {len(offsets)} pesan")
+
+        spikes = find_spikes(
+            offsets, window=self.config["window"],
+            baseline_window=self.config["baseline_window"], k=self.config["k"],
+            min_rate=self.config["min_rate"], cooldown=self.config["cooldown"])
+        self.clips_scheduled = len(spikes)
+        self.log(f"deteksi: {len(spikes)} spike")
+
+        pre = self.config["pre"]
+        post = min(self.config["post"], max(self.config["max_clip"] - pre, 1))
+        for i, (t, rate, base) in enumerate(spikes, 1):
+            if self._job != job or self._stop.is_set():
+                return
+            self.log(f"klip {i}/{len(spikes)}: video {_fmt_time(t)}")
+            self._render_vod_clip(job, url, video_id, t, max(t - pre, 0.0), t + post,
+                                  rate, base)
+        if self._job == job and not self._stop.is_set():
+            self.status = "done"
+            self.log("replay selesai")
+
+    def _render_vod_clip(self, job: int, url: str, video_id: str, t: float,
+                         t0: float, t1: float, rate: float, base: float) -> None:
+        section = None
+        try:
+            section = download_section(
+                url, t0, t1, self.buffer_dir / f"sec_{int(t)}.mp4")
+            if self._job != job or self._stop.is_set():
+                return
+            safe = re.sub(r"[^A-Za-z0-9_-]+", "_", self.channel)[:40] or "channel"
+            stem = f"{safe}_{video_id}" if video_id else safe
+            out = self.clips_dir / f"{stem}_{int(t)}.mp4"
+            render([section.name], out, self.rects_for(self.channel), self.buffer_dir,
+                   self.log, self._subtitle_opts(), max_duration=t1 - t0)
+            score = rate / base if base > 0 else rate / self.config["min_rate"]
+            self.clips.append({
+                "file": out.name,
+                "score": round(score, 2),
+                "rate": round(rate, 1),
+                "at": f"video {_fmt_time(t)}",
+                "title": self.title,
+            })
+            self.log(f"klip jadi: {out.name}")
+        except Exception as exc:
+            self.log(f"klip gagal: {exc}")
+        finally:
+            if section:
+                section.unlink(missing_ok=True)
+
+    def _subtitle_opts(self) -> dict:
+        return {
+            "enabled": bool(self.config.get("subtitles", True)),
+            "model": self.config.get("subtitle_model", "small"),
+            "language": self.config.get("subtitle_language"),
+            "x": self.config.get("subtitle_x", 0.5),
+            "size": self.config.get("subtitle_size", 76),
+        }
 
     def stop(self) -> dict:
         self._stop.set()
@@ -201,13 +313,8 @@ class Manager:
                 return
             safe = re.sub(r"[^A-Za-z0-9_-]+", "_", self.channel)[:40] or "channel"
             out = self.clips_dir / f"{safe}_{int(spike_wall)}.mp4"
-            subtitle_opts = {
-                "enabled": bool(self.config.get("subtitles", True)),
-                "model": self.config.get("subtitle_model", "small"),
-                "language": self.config.get("subtitle_language"),
-            }
             render(names, out, self.rects_for(self.channel), self.buffer_dir, self.log,
-                   subtitle_opts, max_duration=self.config["max_clip"])
+                   self._subtitle_opts(), max_duration=self.config["max_clip"])
             score = rate / base if base > 0 else rate / self.config["min_rate"]
             self.clips.append({
                 "file": out.name,

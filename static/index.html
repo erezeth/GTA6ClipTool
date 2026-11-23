@@ -56,11 +56,18 @@
           <label>w <input id="gw" type="number" step="1" min="1" max="100"></label>
           <label>h <input id="gh" type="number" step="1" min="1" max="100"></label>
         </fieldset>
+        <fieldset class="subtitle">
+          <legend>Subtitle</legend>
+          <label>x % <input id="subx" type="number" step="1" min="0" max="100"></label>
+          <label>ukuran <input id="subsize" type="number" step="1" min="20" max="200"></label>
+          <button id="savesub">Simpan</button>
+        </fieldset>
         <div class="rectactions">
           <button id="save">Simpan</button>
           <button id="refresh">Ambil frame</button>
         </div>
         <p class="hint">Angka persen dari frame asli. Kotak hijau = webcam, biru = gameplay.
+          Subtitle: x % dari lebar output, ukuran font dalam px.
           Klik Ambil frame setelah live jalan untuk kalibrasi.</p>
       </div>
     </div>
