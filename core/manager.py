@@ -49,6 +49,10 @@ class Manager:
         self.clips_scheduled = 0
         self._stop = threading.Event()
         self._job = 0
+        self.chat_warning: str | None = None
+        self._chat_restarts = 0
+        self._chat_last_problem: str | None = None
+        self._chat_since: float | None = None
 
     # ---- state ----
 
@@ -64,11 +68,13 @@ class Manager:
             "uptime": round(now - self.started_wall) if self.started_wall else 0,
             "messages": self.chat.messages_seen if self.chat else self.vod_messages,
             "chat_started": bool(self.chat and self.chat.started),
+            "chat_warning": self.chat_warning,
             "clips_scheduled": self.clips_scheduled,
             "clips": self.clips[-50:],
             "logs": list(self.logs)[-60:],
             "rects": self.rects_for(self.channel),
-            "subtitle": {"x": self.config.get("subtitle_x", 0.5),
+            "subtitle": {"enabled": bool(self.config.get("subtitles", True)),
+                         "x": self.config.get("subtitle_x", 0.5),
                          "size": self.config.get("subtitle_size", 76)},
             **snap,
         }
@@ -104,14 +110,16 @@ class Manager:
         self.log(f"rect {channel}: webcam {clean['webcam']} gameplay {clean['gameplay']}")
 
     def save_config(self, patch: dict) -> None:
+        if "subtitles" in patch:
+            self.config["subtitles"] = bool(patch["subtitles"])
         if "subtitle_x" in patch:
             self.config["subtitle_x"] = min(max(float(patch["subtitle_x"]), 0.0), 1.0)
         if "subtitle_size" in patch:
             self.config["subtitle_size"] = min(max(int(patch["subtitle_size"]), 20), 200)
         (self.root / "config.json").write_text(
             json.dumps(self.config, indent=2), encoding="utf-8")
-        self.log(f"subtitle: x {self.config.get('subtitle_x')} "
-                 f"size {self.config.get('subtitle_size')}")
+        self.log(f"subtitle: {'on' if self.config.get('subtitles', True) else 'off'} "
+                 f"x {self.config.get('subtitle_x')} size {self.config.get('subtitle_size')}")
 
     @staticmethod
     def _load_json(path: Path, default):
@@ -132,6 +140,10 @@ class Manager:
         self.error = None
         self.vod_messages = 0
         self.clips_scheduled = 0
+        self.chat_warning = None
+        self._chat_restarts = 0
+        self._chat_last_problem = None
+        self._chat_since = None
         self._stop.clear()
         self._job += 1
         threading.Thread(target=self._start_worker, args=(self._job,), daemon=True).start()
@@ -156,6 +168,8 @@ class Manager:
             self.clips_dir.mkdir(parents=True, exist_ok=True)
             for old in self.buffer_dir.glob("seg_*.ts"):
                 old.unlink(missing_ok=True)
+            for old in self.buffer_dir.glob("chat.live_chat.json*"):
+                old.unlink(missing_ok=True)
 
             self.recorder = Recorder()
             self.recorder.start(self.url, self.buffer_dir)
@@ -165,6 +179,7 @@ class Manager:
                 k=self.config["k"], min_rate=self.config["min_rate"],
                 cooldown=self.config["cooldown"])
             self.chat = ChatWatcher(self.url, self.buffer_dir, self._on_chat, self._stop)
+            self._chat_since = time.time()
             self.chat.start()
             self.status = "live"
             self.log("rekaman jalan")
@@ -269,8 +284,31 @@ class Manager:
         self.log("berhenti")
         return {"ok": True}
 
+    def _chat_problem(self, now: float) -> str | None:
+        chat = self.chat
+        if not chat or self.status != "live":
+            return None
+        if not chat.is_alive():
+            return "chat mati"
+        if chat.started and chat.last_message_at and now - chat.last_message_at > 30:
+            return "chat macet >30 detik"
+        if not chat.started and self._chat_since and now - self._chat_since > 30:
+            return "chat belum terbaca setelah 30 detik"
+        return None
+
+    def _restart_chat(self) -> None:
+        if self._stop.is_set() or not self.url or self._chat_restarts >= 5:
+            return
+        self._chat_restarts += 1
+        seen = self.chat.messages_seen if self.chat else 0
+        self.log(f"restart chat ({self._chat_restarts}/5)")
+        self.chat = ChatWatcher(self.url, self.buffer_dir, self._on_chat, self._stop)
+        self.chat.messages_seen = seen
+        self._chat_since = time.time()
+        self.chat.start()
+        self._chat_last_problem = None
+
     def _monitor_loop(self) -> None:
-        warned = False
         while not self._stop.wait(1.0):
             if not self.recorder.alive():
                 self.status = "error"
@@ -279,11 +317,15 @@ class Manager:
                 self._stop.set()
                 return
             self.recorder.prune(self.config["pre"] + self.config["post"] + 60)
-            if (not warned and self.status == "live" and self.chat
-                    and not self.chat.started and self.started_wall
-                    and time.time() - self.started_wall > 30):
-                warned = True
-                self.log("peringatan: chat belum terbaca setelah 30 detik")
+            problem = self._chat_problem(time.time())
+            self.chat_warning = problem
+            if problem and problem != self._chat_last_problem:
+                self._chat_last_problem = problem
+                self.log(f"peringatan: {problem}")
+                if problem == "chat mati":
+                    self._restart_chat()
+            elif not problem:
+                self._chat_last_problem = None
 
     # ---- detection ----
 

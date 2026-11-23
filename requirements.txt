@@ -2,3 +2,6 @@ yt-dlp>=2026.10.26
 fastapi>=0.165
 uvicorn>=0.38
 faster-whisper>=1.2
+numpy
+av<17
+pytest

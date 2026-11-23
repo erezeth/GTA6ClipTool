@@ -1,24 +1,58 @@
 """Transkripsi klip dan pembuatan subtitle ASS (burn-in)."""
 from __future__ import annotations
 
+import wave
 from pathlib import Path
 
-_models: dict[str, object] = {}
+import numpy as np
+
+_models: dict[tuple[str, str], object] = {}
+_cpu_only = False
 
 
 def _model(size: str):
-    if size not in _models:
+    if _cpu_only:
+        return _model_cpu(size)
+    key = (size, "cuda")
+    if key not in _models:
         from faster_whisper import WhisperModel
         try:
-            _models[size] = WhisperModel(size, device="cuda", compute_type="float16")
+            _models[key] = WhisperModel(size, device="cuda", compute_type="float16")
         except Exception:
-            _models[size] = WhisperModel(size, device="cpu", compute_type="int8")
-    return _models[size]
+            return _model_cpu(size)
+    return _models[key]
 
 
-def transcribe(audio: Path, model_size: str = "small", language: str | None = None) -> list[dict]:
-    segments, _ = _model(model_size).transcribe(
-        str(audio), word_timestamps=True, vad_filter=True, language=language)
+def _model_cpu(size: str):
+    key = (size, "cpu")
+    if key not in _models:
+        from faster_whisper import WhisperModel
+        _models[key] = WhisperModel(size, device="cpu", compute_type="int8")
+    return _models[key]
+
+
+def _load_wav(path: Path) -> np.ndarray:
+    """Baca WAV 16 kHz mono 16-bit (hasil ffmpeg) jadi array float32.
+
+    Dengan ini faster-whisper tidak decode lewat PyAV, jadi versi `av` tidak
+    lagi memengaruhi timing transkripsi (penyebab subtitle/audio meleset).
+    """
+    with wave.open(str(path), "rb") as w:
+        if w.getsampwidth() != 2:
+            raise ValueError(f"WAV harus 16-bit, dapat {w.getsampwidth() * 8}-bit")
+        channels = w.getnchannels()
+        raw = w.readframes(w.getnframes())
+    data = np.frombuffer(raw, dtype=np.int16)
+    if channels > 1:
+        data = data.reshape(-1, channels).mean(axis=1).astype(np.int16)
+    return data.astype(np.float32) / 32768.0
+
+
+def _run(model, samples: np.ndarray, language: str | None) -> list[dict]:
+    # segments adalah generator: transkripsi baru jalan saat di-iterasi,
+    # jadi error CUDA muncul di sini, bukan saat model dibuat.
+    segments, _ = model.transcribe(
+        samples, word_timestamps=True, vad_filter=True, language=language)
     words = []
     for seg in segments:
         for word in seg.words or []:
@@ -26,6 +60,20 @@ def transcribe(audio: Path, model_size: str = "small", language: str | None = No
             if text:
                 words.append({"start": word.start, "end": word.end, "text": text})
     return words
+
+
+def transcribe(audio: Path, model_size: str = "small", language: str | None = None) -> list[dict]:
+    global _cpu_only
+    samples = _load_wav(audio)
+    try:
+        return _run(_model(model_size), samples, language)
+    except Exception as exc:
+        msg = str(exc).lower()
+        if _cpu_only or not any(k in msg for k in ("cublas", "cudnn", "cuda", ".dll")):
+            raise
+        print(f"CUDA tidak bisa dipakai ({exc}); pindah ke CPU.")
+        _cpu_only = True
+        return _run(_model_cpu(model_size), samples, language)
 
 
 def group_words(words: list[dict], max_words: int = 3, max_chars: int = 20,

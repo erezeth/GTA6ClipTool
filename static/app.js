@@ -6,6 +6,7 @@ let rectDirty = false;
 let clipsKey = "";
 let currentChannel = "";
 let previewRequested = false;
+let subtitleOn = true;
 
 function fmtUptime(sec) {
   const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
@@ -118,7 +119,7 @@ function render(state) {
   $("status").className = `pill ${state.status}`;
   $("meta").textContent = state.title || "tempel URL live YouTube lalu Start";
   $("uptime").textContent = state.uptime ? fmtUptime(state.uptime) : "";
-  $("error").textContent = state.error || "";
+  $("error").textContent = state.error || state.chat_warning || "";
   $("rate").textContent = state.rate.toFixed(1);
   $("baseline").textContent = state.baseline.toFixed(1);
   $("threshold").textContent = state.threshold.toFixed(1);
@@ -149,6 +150,8 @@ function render(state) {
     $("subx").value = Math.round(state.subtitle.x * 100);
     $("subsize").value = state.subtitle.size;
   }
+  subtitleOn = state.subtitle.enabled;
+  $("subtogg").textContent = `Subtitle: ${subtitleOn ? "ON" : "OFF"}`;
 
   if (state.status === "live" && !previewRequested) {
     previewRequested = true;
@@ -193,6 +196,7 @@ $("savesub").onclick = () => post("/api/config", {
   subtitle_x: (+$("subx").value || 0) / 100,
   subtitle_size: +$("subsize").value || 76,
 });
+$("subtogg").onclick = () => post("/api/config", { subtitles: !subtitleOn });
 ["wx", "wy", "ww", "wh", "gx", "gy", "gw", "gh"].forEach((id) => {
   $(id).addEventListener("input", () => {
     rectDirty = true;

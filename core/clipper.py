@@ -9,8 +9,7 @@ from .subtitles import group_words, transcribe, write_ass
 
 OUT_W, OUT_H = 1080, 1920
 FACE_H = 1000
-SAFE_H = 220
-GAME_H = OUT_H - FACE_H - SAFE_H
+GAME_H = OUT_H - FACE_H
 
 _nvenc: bool | None = None
 _nvenc_lock = threading.Lock()

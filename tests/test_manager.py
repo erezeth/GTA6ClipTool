@@ -58,13 +58,47 @@ def test_spike_schedules_clip_without_recorder(tmp_path):
     assert m.clips_scheduled == 1
 
 
+def test_chat_problem_flags_dead_stalled_and_unstarted(tmp_path):
+    class FakeChat:
+        def __init__(self, alive=True, started=True, last=None):
+            self._alive = alive
+            self.started = started
+            self.last_message_at = last
+
+        def is_alive(self):
+            return self._alive
+
+    now = time.time()
+    m = Manager(tmp_path)
+    m.status = "live"
+    m.started_wall = now - 100
+    m._chat_since = now - 100
+    m.chat = FakeChat(alive=False)
+    assert m._chat_problem(now) == "chat mati"
+    m.chat = FakeChat(started=True, last=now - 31)
+    assert m._chat_problem(now) == "chat macet >30 detik"
+    m.chat = FakeChat(started=True, last=now)
+    assert m._chat_problem(now) is None
+    m.chat = FakeChat(started=False)
+    assert m._chat_problem(now) == "chat belum terbaca setelah 30 detik"
+
+
 def test_save_config_clamps_and_persists(tmp_path):
     m = Manager(tmp_path)
     m.save_config({"subtitle_x": 2, "subtitle_size": 5000})
     assert m.config["subtitle_x"] == 1.0
     assert m.config["subtitle_size"] == 200
-    assert m.state()["subtitle"] == {"x": 1.0, "size": 200}
+    assert m.state()["subtitle"] == {"enabled": True, "x": 1.0, "size": 200}
     assert Manager(tmp_path).config["subtitle_x"] == 1.0
+
+
+def test_subtitles_toggle_persists(tmp_path):
+    m = Manager(tmp_path)
+    m.save_config({"subtitles": False})
+    assert m.state()["subtitle"]["enabled"] is False
+    assert Manager(tmp_path).config["subtitles"] is False
+    m.save_config({"subtitles": True})
+    assert m.state()["subtitle"]["enabled"] is True
 
 
 def test_vod_pipeline_renders_each_spike(tmp_path, monkeypatch):

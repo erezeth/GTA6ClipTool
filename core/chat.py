@@ -59,6 +59,19 @@ def read_offsets(path: Path) -> list[float]:
     return offsets
 
 
+def _read_from(path: Path, offset: int) -> tuple[bytes, int]:
+    """Baca byte baru dari path. Reset ke awal kalau file mengecil (truncate/rotate)."""
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return b"", offset
+    if size < offset:
+        offset = 0
+    with path.open("rb") as fh:
+        fh.seek(offset)
+        return fh.read(), fh.tell()
+
+
 class ChatWatcher(threading.Thread):
     def __init__(self, url: str, outdir: Path, on_message, stop_event: threading.Event):
         super().__init__(daemon=True)
@@ -70,6 +83,20 @@ class ChatWatcher(threading.Thread):
         self.last_message_at: float | None = None
         self.proc: subprocess.Popen | None = None
         self.started = False
+
+    def alive(self) -> bool:
+        return self.is_alive() and self.proc is not None and self.proc.poll() is None
+
+    def _consume(self, chunk: bytes, buf: bytes, primed: bool) -> tuple[bool, bytes]:
+        if not chunk:
+            return primed, buf
+        buf += chunk
+        *lines, buf = buf.split(b"\n")
+        # frag pertama = backlog chat sebelum kita mulai; bukan laju live
+        if not primed and lines:
+            primed, lines = True, []
+        self._emit(parse_messages(lines))
+        return primed, buf
 
     def run(self) -> None:
         self.outdir.mkdir(parents=True, exist_ok=True)
@@ -87,24 +114,17 @@ class ChatWatcher(threading.Thread):
                              if p.exists()), None)
                 if path:
                     self.started = True
-                    if path != current:
-                        if current is not None and primed:
-                            offset, buf = path.stat().st_size, b""
-                        else:
-                            offset, buf = 0, b""
-                        current = path
-                    with open(path, "rb") as fh:
-                        fh.seek(offset)
-                        chunk = fh.read()
-                        offset = fh.tell()
-                    if chunk:
-                        buf += chunk
-                        *lines, buf = buf.split(b"\n")
-                        # frag pertama = backlog chat sebelum kita mulai; bukan laju live
-                        if not primed and lines:
-                            primed, lines = True, []
-                        self._emit(parse_messages(lines))
+                    current = path
+                    chunk, offset = _read_from(path, offset)
+                    primed, buf = self._consume(chunk, buf, primed)
                 self.stop_event.wait(0.5)
+            if not self.stop_event.is_set():
+                path = next((p for p in (self.outdir / "chat.live_chat.json.part",
+                                         self.outdir / "chat.live_chat.json")
+                             if p.exists()), current)
+                if path:
+                    chunk, offset = _read_from(path, offset)
+                    self._consume(chunk, buf, primed)
         finally:
             if self.proc and self.proc.poll() is None:
                 self.proc.terminate()

@@ -1,5 +1,5 @@
 import core.clipper as clipper
-from core.clipper import build_filter, pick_segments
+from core.clipper import GAME_H, build_filter, pick_segments
 
 WEBCAM = {"x": 0.68, "y": 0.03, "w": 0.29, "h": 0.40}
 GAMEPLAY = {"x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0}
@@ -9,7 +9,7 @@ def test_build_filter_geometry_and_order():
     f = build_filter(1920, 1080, WEBCAM, GAMEPLAY)
     assert "crop=557:432:1306:32" in f
     assert "crop=1920:1080:0:0" in f
-    assert "scale=1080:700:force_original_aspect_ratio=increase" in f
+    assert f"scale=1080:{GAME_H}:force_original_aspect_ratio=increase" in f
     assert "vstack=inputs=2" in f
     assert "pad=1080:1920:0:0:black" in f
     assert f.index("[face]") < f.index("[game]")
