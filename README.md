@@ -14,10 +14,12 @@ Pantau live YouTube, deteksi lonjakan live chat, potong klip vertikal 9:16
 4. Saat klip pertama, cek hasilnya. Kalau facecam/gameplay kepotong, atur
    rect-nya di dashboard: klik **Ambil frame**, lalu isi x/y/w/h (persen)
    sampai kotak hijau pas di webcam dan kotak biru pas di gameplay, lalu
-   **Simpan**. Rect disimpan per channel.
+   **Simpan crop**. Rect disimpan per channel.
 5. Posisi Y dan ukuran subtitle diatur di fieldset **Subtitle** (y % dari tinggi
-   output, ukuran font dalam px). Tombol **Subtitle: ON/OFF** mematikan atau
-   menyalakan subtitle untuk klip berikutnya.
+   output, ukuran font dalam px), lalu **Simpan subtitle**. Garis putus-putus
+   kuning di preview menandai posisi subtitle. Tombol **Subtitle: ON/OFF**
+   mematikan atau menyalakan subtitle untuk klip berikutnya. **Simpan crop**
+   juga menyimpan subtitle yang belum di-save.
 
 ## Setelan
 
@@ -67,5 +69,6 @@ python -m venv .venv
 ```
 
 `tests/test_render.py` merender ~20 detik segmen terakhir dari `buffer/` ke
-`clips/test_manual.mp4`, memakai rect channel yang terakhir disimpan. Jalankan
+`clips/test_manual.mp4`, memakai rect channel yang terakhir disimpan dan setting
+subtitle dari `config.json` (ON/OFF, `subtitle_y`, `subtitle_size`). Jalankan
 saat dashboard sedang LIVE supaya buffer terisi.
