@@ -1,62 +1,68 @@
 # Live Clipper
 
-Pantau live YouTube, deteksi lonjakan live chat, potong klip vertikal 9:16
-(facecam di atas, gameplay di bawah) otomatis.
+**English** | [Bahasa Indonesia](README.id.md)
 
-## Pakai
+Monitor YouTube live streams, detect live chat spikes, and automatically cut
+vertical 9:16 clips (facecam on top, gameplay below).
 
-1. Double-click `run.bat`. Browser terbuka di `http://127.0.0.1:8765`.
-2. Tempel URL live YouTube: bisa live yang sedang jalan, atau replay live yang
-   sudah selesai.
-3. Start. Untuk live: tool merekam ke `buffer/`, memantau chat, dan menyimpan
-   klip di `clips/`. Untuk replay: tool mengunduh chat replay dulu, mendeteksi
-   lonjakan, lalu hanya mengunduh bagian video di sekitar lonjakan.
-4. Saat klip pertama, cek hasilnya. Kalau facecam/gameplay kepotong, atur
-   rect-nya di dashboard: klik **Ambil frame**, lalu isi x/y/w/h (persen)
-   sampai kotak hijau pas di webcam dan kotak biru pas di gameplay, lalu
-   **Simpan crop**. Rect disimpan per channel.
-5. Posisi Y dan ukuran subtitle diatur di fieldset **Subtitle** (y % dari tinggi
-   output, ukuran font dalam px), lalu **Simpan subtitle**. Garis putus-putus
-   kuning di preview menandai posisi subtitle. Tombol **Subtitle: ON/OFF**
-   mematikan atau menyalakan subtitle untuk klip berikutnya. **Simpan crop**
-   juga menyimpan subtitle yang belum di-save.
+## Usage
 
-## Setelan
+1. Double-click `run.bat`. The browser opens at `http://127.0.0.1:8765`.
+2. Paste a YouTube live URL: either an ongoing live stream or a finished live
+   replay.
+3. Start. For live streams, the tool records to `buffer/`, monitors chat, and
+   saves clips in `clips/`. For replays, the tool downloads the chat replay
+   first, detects spikes, then downloads only the video segments around those
+   spikes.
+4. On the first clip, check the result. If the facecam or gameplay is cropped
+   incorrectly, adjust the rect in the dashboard: click **Grab frame**, then set
+   x/y/w/h (percent) until the green box fits the webcam and the blue box fits
+   the gameplay, then **Save crop**. Rects are stored per channel.
+5. Set the subtitle Y position and size in the **Subtitle** fieldset (y % of the
+   output height, font size in px), then **Save subtitle**. The yellow dashed
+   line in the preview marks the subtitle position. The **Subtitle: ON/OFF**
+   button disables or enables subtitles for the next clips. **Save crop** also
+   saves any unsaved subtitle changes.
+
+## Settings
 
 `config.json`:
 
-| key | arti |
-|-----|------|
-| `pre` | detik sebelum spike (default 20) |
-| `post` | detik setelah spike (default 30) |
-| `max_clip` | panjang klip maksimum, detik (default 50) |
-| `window` | jendela hitung rate, detik |
-| `baseline_window` | panjang baseline, detik |
+| key | meaning |
+|-----|---------|
+| `pre` | seconds before a spike (default 20) |
+| `post` | seconds after a spike (default 30) |
+| `max_clip` | maximum clip length, seconds (default 50) |
+| `window` | rate calculation window, seconds |
+| `baseline_window` | baseline length, seconds |
 | `k` | spike = k x baseline |
-| `min_rate` | ambang minimum msg/detik |
-| `cooldown` | jeda minimum antar klip, detik |
-| `subtitles` | auto subtitle via faster-whisper (default `true`) |
-| `subtitle_model` | ukuran model whisper (default `small`) |
-| `subtitle_language` | kode bahasa, `null` = deteksi otomatis |
-| `subtitle_y` | posisi vertikal subtitle, 0..1 dari atas (default `0.51` = tengah) |
-| `subtitle_size` | ukuran font subtitle dalam px (default `76`) |
+| `min_rate` | minimum threshold, messages/second |
+| `cooldown` | minimum time between clips, seconds |
+| `subtitles` | auto subtitles via faster-whisper (default `true`) |
+| `subtitle_model` | whisper model size (default `small`) |
+| `subtitle_language` | language code, `null` = auto-detect |
+| `subtitle_y` | vertical subtitle position, 0..1 from the top (default `0.51` = center) |
+| `subtitle_size` | subtitle font size in px (default `76`) |
 
-`channels.json` menyimpan rect webcam dan gameplay per channel (0..1, relatif
-ke frame).
+`channels.json` stores the webcam and gameplay rects per channel (0..1, relative
+to the frame).
 
-## Batasan
+## Limitations
 
-- Satu stream aktif dalam satu waktu.
-- Butuh ffmpeg di PATH. NVENC dipakai kalau ada, kalau tidak fallback libx264.
-- Stream publik saja. URL privat/umur terbatas tidak didukung.
-- Live: buffer hanya menyimpan `pre + post + 60` detik; klip dibuat saat spike,
-  bukan setelah live selesai. Panjang klip dibatasi `max_clip` (50 detik).
-- Replay: chat replay harus tersedia (bisa dimatikan streamer). Video diunduh
-  hanya pada rentang spike, jadi tidak perlu mengunduh seluruh replay.
-- Klip pertama yang memakai subtitle mengunduh model faster-whisper dulu, jadi
-  render bisa lama. Klip berikutnya memakai model yang sudah di-cache.
-- Endpoint chat memakai fitur `live_chat` yt-dlp. Kalau YouTube mengubah
-  protokol, chat rate akan 0 dan dashboard memberi peringatan.
+- One active stream at a time.
+- Requires ffmpeg in PATH. NVENC is used when available, otherwise it falls back
+  to libx264.
+- Public streams only. Private or expiring URLs are not supported.
+- Live: the buffer keeps only `pre + post + 60` seconds; clips are created when a
+  spike occurs, not after the live stream ends. Clip length is limited by
+  `max_clip` (50 seconds).
+- Replay: chat replay must be available (the streamer can disable it). Video is
+  downloaded only for spike ranges, so the full replay does not need to be
+  downloaded.
+- The first clip with subtitles downloads the faster-whisper model, so rendering
+  can take a while. Later clips use the cached model.
+- The chat endpoint uses yt-dlp's `live_chat` feature. If YouTube changes the
+  protocol, the chat rate will be 0 and the dashboard will show a warning.
 
 ## Dev
 
@@ -68,7 +74,7 @@ python -m venv .venv
 .venv\Scripts\python tests\test_render.py
 ```
 
-`tests/test_render.py` merender ~20 detik segmen terakhir dari `buffer/` ke
-`clips/test_manual.mp4`, memakai rect channel yang terakhir disimpan dan setting
-subtitle dari `config.json` (ON/OFF, `subtitle_y`, `subtitle_size`). Jalankan
-saat dashboard sedang LIVE supaya buffer terisi.
+`tests/test_render.py` renders the last ~20 seconds of segments from `buffer/` to
+`clips/test_manual.mp4`, using the last saved channel rects and the subtitle
+settings from `config.json` (ON/OFF, `subtitle_y`, `subtitle_size`). Run it while
+the dashboard is LIVE so the buffer is filled.
