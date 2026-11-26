@@ -6,32 +6,8 @@ from pathlib import Path
 
 import numpy as np
 
-# --- PENGATURAN SUBTITLE ---
-SUBTITLES_ENABLED = True    # False = matikan subtitle total
-USE_GPU = True              # False = paksa CPU
-
-FONT_NAME = "Arial"
-FONT_SIZE = 76
-POS_X = None                # None = tengah
-POS_Y = 980                 # titik tengah teks dari atas (kanvas 1080x1920)
-
-# Warna format ASS: &HAABBGGRR
-PRIMARY_COLOUR = "&H00FFFFFF"
-OUTLINE_COLOUR = "&H00000000"
-BACK_COLOUR = "&H80000000"
-
-BOLD = True
-OUTLINE_WIDTH = 7
-SHADOW = 2
-MARGIN_LR = 40
-
-MAX_WORDS = 3
-MAX_CHARS = 20
-MAX_DUR = 2.2
-MAX_GAP = 0.7
-
 _models: dict[tuple[str, str], object] = {}
-_cpu_only = not USE_GPU
+_cpu_only = False
 
 
 def _model(size: str):
@@ -58,8 +34,8 @@ def _model_cpu(size: str):
 def _load_wav(path: Path) -> np.ndarray:
     """Baca WAV 16 kHz mono 16-bit (hasil ffmpeg) jadi array float32.
 
-    Dengan ini faster-whisper tidak perlu decode lewat PyAV, jadi versi `av`
-    tidak lagi memengaruhi transkripsi.
+    Dengan ini faster-whisper tidak decode lewat PyAV, jadi versi `av` tidak
+    lagi memengaruhi timing transkripsi (penyebab subtitle/audio meleset).
     """
     with wave.open(str(path), "rb") as w:
         if w.getsampwidth() != 2:
@@ -100,8 +76,8 @@ def transcribe(audio: Path, model_size: str = "small", language: str | None = No
         return _run(_model_cpu(model_size), samples, language)
 
 
-def group_words(words: list[dict], max_words: int = MAX_WORDS, max_chars: int = MAX_CHARS,
-                max_dur: float = MAX_DUR, max_gap: float = MAX_GAP) -> list[dict]:
+def group_words(words: list[dict], max_words: int = 3, max_chars: int = 20,
+                max_dur: float = 2.2, max_gap: float = 0.7) -> list[dict]:
     chunks: list[list[dict]] = []
     current: list[dict] = []
     for word in words:
@@ -132,10 +108,7 @@ def _escape(text: str) -> str:
 
 
 def write_ass(chunks: list[dict], path: Path, width: int = 1080, height: int = 1920,
-              font_size: int = FONT_SIZE, pos_y: int = POS_Y,
-              pos_x: int | None = POS_X) -> Path:
-    x = width // 2 if pos_x is None else pos_x
-    bold = -1 if BOLD else 0
+              font_size: int = 76, pos_y: float = 0.51) -> Path:
     header = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: {width}
@@ -145,7 +118,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{FONT_NAME},{font_size},{PRIMARY_COLOUR},&H000000FF,{OUTLINE_COLOUR},{BACK_COLOUR},{bold},0,0,0,100,100,0,0,1,{OUTLINE_WIDTH},{SHADOW},5,{MARGIN_LR},{MARGIN_LR},0,1
+Style: Default,Arial,{font_size},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,7,2,5,40,40,0,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -155,6 +128,6 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         text = _escape(chunk["text"])
         lines.append(
             f"Dialogue: 0,{_ass_time(chunk['start'])},{_ass_time(chunk['end'])},Default,,0,0,0,,"
-            f"{{\\pos({x},{pos_y})}}{text}\n")
+            f"{{\\pos({width // 2},{round(pos_y * height)})}}{text}\n")
     path.write_text("".join(lines), encoding="utf-8")
     return path

@@ -22,7 +22,7 @@ app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
 @app.get("/")
 def index():
-    return FileResponse(STATIC / "index.html")
+    return FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/state")
@@ -54,6 +54,12 @@ def stop():
 def save_rect(body: dict):
     manager.save_rects(str(body.get("channel", "")), body.get("webcam", {}),
                        body.get("gameplay", {}))
+    return {"ok": True}
+
+
+@app.post("/api/config")
+def save_config(body: dict):
+    manager.save_config(body)
     return {"ok": True}
 
 

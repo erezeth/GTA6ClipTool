@@ -23,5 +23,13 @@ def test_group_words_respects_max_words():
 def test_write_ass_escapes_and_positions(tmp_path):
     path = write_ass([{"start": 0.0, "end": 1.5, "text": "a{b}c"}], tmp_path / "s.ass")
     text = path.read_text(encoding="utf-8")
-    assert "Dialogue: 0,0:00:00.00,0:00:01.50,Default,,0,0,0,,{\\pos(540,980)}a(b)c" in text
+    assert "Dialogue: 0,0:00:00.00,0:00:01.50,Default,,0,0,0,,{\\pos(540,979)}a(b)c" in text
     assert "PlayResY: 1920" in text
+
+
+def test_write_ass_custom_y_and_size(tmp_path):
+    path = write_ass([{"start": 0.0, "end": 1.0, "text": "halo"}], tmp_path / "s.ass",
+                     pos_y=0.25, font_size=90)
+    text = path.read_text(encoding="utf-8")
+    assert "{\\pos(540,480)}halo" in text
+    assert ",Arial,90," in text

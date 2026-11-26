@@ -47,6 +47,8 @@ header {
 }
 .pill.live { color: #0d0f12; background: var(--accent); border-color: var(--accent); }
 .pill.starting { color: var(--warn); border-color: var(--warn); }
+.pill.vod { color: var(--warn); border-color: var(--warn); }
+.pill.done { color: var(--accent); border-color: var(--accent); }
 .pill.error { color: var(--danger); border-color: var(--danger); }
 
 main {
@@ -114,7 +116,7 @@ button:disabled { opacity: .45; cursor: default; }
 .clip .cap b { color: var(--text); }
 .empty { color: var(--dim); }
 
-.rectrow { display: grid; grid-template-columns: minmax(280px, 640px) 1fr; gap: 18px; }
+.rectrow { display: grid; grid-template-columns: minmax(280px, 640px) 1fr; gap: 18px; align-items: start; }
 .previewwrap { position: relative; background: #000; border-radius: 8px; overflow: hidden; }
 #preview { width: 100%; display: block; }
 .nopreview {
@@ -136,6 +138,7 @@ button:disabled { opacity: .45; cursor: default; }
 .rectinputs legend { color: var(--dim); font-size: 12px; padding: 0 4px; }
 .rectinputs fieldset.webcam { border-color: #2f5f4a; }
 .rectinputs fieldset.gameplay { border-color: #2a4a70; }
+.rectinputs fieldset.subtitle { border-color: #5a4a2a; }
 .rectactions { display: flex; gap: 8px; flex-basis: 100%; }
 .hint { flex-basis: 100%; color: var(--dim); font-size: 12px; margin: 4px 0 0; }
 

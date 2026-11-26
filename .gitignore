@@ -4,5 +4,3 @@ clips/
 __pycache__/
 .pytest_cache/
 *.log
-channels.json
-docs/todo

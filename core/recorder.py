@@ -21,6 +21,7 @@ def resolve(url: str) -> dict:
         "id": info.get("id", ""),
         "title": info.get("title", ""),
         "channel": info.get("channel") or info.get("uploader") or "unknown",
+        "live_status": info.get("live_status", ""),
         "is_live": info.get("live_status") in ("is_live", "is_upcoming") or bool(info.get("is_live")),
     }
 
@@ -38,6 +39,22 @@ def _stream_urls(url: str) -> list[str]:
     return urls[:2]
 
 
+def download_section(url: str, start: float, end: float, out: Path) -> Path:
+    """Unduh hanya potongan [start, end] dari replay (detik video)."""
+    res = subprocess.run(
+        [*YTDLP, "--no-warnings", "--no-playlist",
+         "--download-sections", f"*{start:g}-{end:g}",
+         "--force-keyframes-at-cuts", "--merge-output-format", "mp4",
+         "-f", "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b",
+         "-o", str(out), url],
+        capture_output=True, text=True, timeout=600)
+    path = out if out.exists() else next(
+        (p for p in out.parent.glob(out.stem + ".*") if p.is_file()), None)
+    if res.returncode != 0 or path is None:
+        raise RuntimeError((res.stderr or "").strip()[-500:] or "gagal unduh potongan video")
+    return path
+
+
 class Recorder:
     def __init__(self):
         self.outdir: Path | None = None
@@ -49,8 +66,10 @@ class Recorder:
         outdir.mkdir(parents=True, exist_ok=True)
         urls = _stream_urls(url)
         cmd = ["ffmpeg", "-hide_banner", "-loglevel", "warning", "-nostdin"]
+        # -copyts: jangan normalkan timestamp tiap input sendiri-sendiri.
+        # Tanpa ini audio/video dari dua manifest HLS bisa bergeser (audio delay).
         for u in urls:
-            cmd += ["-i", u]
+            cmd += ["-copyts", "-i", u]
         if len(urls) > 1:
             cmd += ["-map", "0:v:0", "-map", "1:a:0"]
         cmd += ["-c", "copy", "-f", "segment", "-segment_time", "2",
