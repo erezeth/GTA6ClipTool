@@ -20,6 +20,15 @@ def test_rects_default_and_persist(tmp_path):
     assert saved["gameplay"]["x"] == 0.2
 
 
+def test_last_saved_channel_is_reordered_to_end(tmp_path):
+    m = Manager(tmp_path)
+    m.save_rects("a", {}, {})
+    m.save_rects("b", {}, {})
+    m.save_rects("a", {}, {})
+    data = m._load_json(m.channels_path, {})
+    assert list(data) == ["b", "a"]
+
+
 def test_old_flat_rect_is_read_as_webcam(tmp_path):
     (tmp_path / "channels.json").write_text('{"x": {"x": 0.1, "y": 0.1, "w": 0.2, "h": 0.2}}')
     rects = Manager(tmp_path).rects_for("x")
@@ -85,11 +94,12 @@ def test_chat_problem_flags_dead_stalled_and_unstarted(tmp_path):
 
 def test_save_config_clamps_and_persists(tmp_path):
     m = Manager(tmp_path)
-    m.save_config({"subtitle_x": 2, "subtitle_size": 5000})
-    assert m.config["subtitle_x"] == 1.0
+    m.save_config({"subtitle_y": 2, "subtitle_size": 5000})
+    assert m.config["subtitle_y"] == 1.0
     assert m.config["subtitle_size"] == 200
-    assert m.state()["subtitle"] == {"enabled": True, "x": 1.0, "size": 200}
-    assert Manager(tmp_path).config["subtitle_x"] == 1.0
+    assert m.state()["subtitle"] == {"enabled": True, "y": 1.0, "size": 200}
+    assert Manager(tmp_path).config["subtitle_y"] == 1.0
+    assert "subtitle_x" not in m.config
 
 
 def test_subtitles_toggle_persists(tmp_path):

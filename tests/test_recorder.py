@@ -1,6 +1,7 @@
 import os
 import time
 
+import core.recorder as recorder
 from core.recorder import Recorder
 
 
@@ -34,3 +35,26 @@ def test_stream_time_relative_to_start():
     r = Recorder()
     r.started_wall = 1000.0
     assert r.stream_time(1042.5) == 42.5
+
+
+def test_start_keeps_input_timestamps(tmp_path, monkeypatch):
+    monkeypatch.setattr(recorder, "_stream_urls", lambda url: ["video-url", "audio-url"])
+    calls = []
+
+    class FakeProc:
+        pass
+
+    def fake_popen(cmd, **kwargs):
+        calls.append(cmd)
+        return FakeProc()
+
+    monkeypatch.setattr(recorder.subprocess, "Popen", fake_popen)
+    r = Recorder()
+    try:
+        r.start("https://example.com/live", tmp_path)
+    finally:
+        r.log.close()
+    cmd = calls[0]
+    inputs = [i for i, arg in enumerate(cmd) if arg == "-i"]
+    assert len(inputs) == 2
+    assert all(cmd[i - 1] == "-copyts" for i in inputs)

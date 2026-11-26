@@ -66,8 +66,10 @@ class Recorder:
         outdir.mkdir(parents=True, exist_ok=True)
         urls = _stream_urls(url)
         cmd = ["ffmpeg", "-hide_banner", "-loglevel", "warning", "-nostdin"]
+        # -copyts: jangan normalkan timestamp tiap input sendiri-sendiri.
+        # Tanpa ini audio/video dari dua manifest HLS bisa bergeser (audio delay).
         for u in urls:
-            cmd += ["-i", u]
+            cmd += ["-copyts", "-i", u]
         if len(urls) > 1:
             cmd += ["-map", "0:v:0", "-map", "1:a:0"]
         cmd += ["-c", "copy", "-f", "segment", "-segment_time", "2",

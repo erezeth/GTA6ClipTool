@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import core.clipper as clipper
 from core.clipper import GAME_H, build_filter, pick_segments
 
@@ -65,3 +67,17 @@ def test_pick_segments_covers_window():
 def test_pick_segments_short_buffer():
     entries = [("seg_000000.ts", 0.0, 2.0)]
     assert pick_segments(entries, 0.0, 5.0) == ["seg_000000.ts"]
+
+
+def test_audio_chain_delays_late_audio(monkeypatch):
+    monkeypatch.setattr(clipper, "_first_pts",
+                        lambda path, stream: 10.0 if stream == "v:0" else 10.5)
+    chain = clipper._audio_chain(Path("seg.ts"))
+    assert chain.startswith("adelay=500|500")
+
+
+def test_audio_chain_trims_early_audio(monkeypatch):
+    monkeypatch.setattr(clipper, "_first_pts",
+                        lambda path, stream: 10.5 if stream == "v:0" else 10.0)
+    chain = clipper._audio_chain(Path("seg.ts"))
+    assert chain.startswith("atrim=start=0.500")

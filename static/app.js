@@ -1,4 +1,5 @@
 const $ = (id) => document.getElementById(id);
+if (!$("suby") && $("subx")) $("subx").id = "suby";
 const history = [];
 const MAX_POINTS = 180;
 let previewImg = null;
@@ -7,6 +8,7 @@ let clipsKey = "";
 let currentChannel = "";
 let previewRequested = false;
 let subtitleOn = true;
+let subtitleDraft = null;
 
 function fmtUptime(sec) {
   const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
@@ -71,6 +73,32 @@ function drawPreview() {
   const rects = readRects();
   drawBox(ctx, rects.gameplay, c.width, c.height, "#5aa9ff", "gameplay");
   drawBox(ctx, rects.webcam, c.width, c.height, "#6ee7a8", "webcam");
+  drawSubtitle(ctx, c.width, c.height);
+}
+
+function drawSubtitle(ctx, w, h) {
+  const y = Math.min(Math.max((+$("suby").value || 0) / 100, 0), 1) * h;
+  const size = Math.max(9, (+$("subsize").value || 76) * h / 1920);
+  ctx.save();
+  ctx.strokeStyle = "#ffc857";
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath();
+  ctx.moveTo(0, y);
+  ctx.lineTo(w, y);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = "#ffc857";
+  ctx.font = `bold ${size}px Arial, sans-serif`;
+  ctx.textAlign = "center";
+  ctx.fillText("Subtitle", w / 2, y + size / 3);
+  ctx.restore();
+}
+
+function readSubtitle() {
+  return {
+    subtitle_y: (+$("suby").value || 0) / 100,
+    subtitle_size: +$("subsize").value || 76,
+  };
 }
 
 function readRects() {
@@ -147,8 +175,14 @@ function render(state) {
   }
   if (!rectDirty && document.activeElement?.tagName !== "INPUT") {
     writeRects(state.rects);
-    $("subx").value = Math.round(state.subtitle.x * 100);
-    $("subsize").value = state.subtitle.size;
+    if (!subtitleDraft) {
+      $("suby").value = Math.round(state.subtitle.y * 100);
+      $("subsize").value = state.subtitle.size;
+    } else if (subtitleDraft.subtitle_y === state.subtitle.y &&
+               subtitleDraft.subtitle_size === state.subtitle.size) {
+      subtitleDraft = null;
+    }
+    drawPreview();
   }
   subtitleOn = state.subtitle.enabled;
   $("subtogg").textContent = `Subtitle: ${subtitleOn ? "ON" : "OFF"}`;
@@ -187,16 +221,31 @@ async function post(path, body) {
 $("start").onclick = () => post("/api/start", { url: $("url").value });
 $("stop").onclick = () => post("/api/stop");
 $("refresh").onclick = loadPreview;
+async function saveSubtitle() {
+  subtitleDraft = readSubtitle();
+  try {
+    await post("/api/config", subtitleDraft);
+  } catch {
+    subtitleDraft = null;
+  }
+}
+
 $("save").onclick = async () => {
   const rects = readRects();
   await post("/api/rect", { channel: currentChannel || "default", ...rects });
   rectDirty = false;
+  if (subtitleDraft) await saveSubtitle();
 };
-$("savesub").onclick = () => post("/api/config", {
-  subtitle_x: (+$("subx").value || 0) / 100,
-  subtitle_size: +$("subsize").value || 76,
-});
-$("subtogg").onclick = () => post("/api/config", { subtitles: !subtitleOn });
+$("savesub").onclick = saveSubtitle;
+$("subtogg").onclick = () => {
+  subtitleOn = !subtitleOn;
+  $("subtogg").textContent = `Subtitle: ${subtitleOn ? "ON" : "OFF"}`;
+  post("/api/config", { subtitles: subtitleOn });
+};
+["suby", "subsize"].forEach((id) => $(id).addEventListener("input", () => {
+  subtitleDraft = readSubtitle();
+  drawPreview();
+}));
 ["wx", "wy", "ww", "wh", "gx", "gy", "gw", "gh"].forEach((id) => {
   $(id).addEventListener("input", () => {
     rectDirty = true;

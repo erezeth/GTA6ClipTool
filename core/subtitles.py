@@ -108,7 +108,7 @@ def _escape(text: str) -> str:
 
 
 def write_ass(chunks: list[dict], path: Path, width: int = 1080, height: int = 1920,
-              font_size: int = 76, pos_x: float = 0.5, pos_y: int = 980) -> Path:
+              font_size: int = 76, pos_y: float = 0.51) -> Path:
     header = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: {width}
@@ -128,6 +128,6 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         text = _escape(chunk["text"])
         lines.append(
             f"Dialogue: 0,{_ass_time(chunk['start'])},{_ass_time(chunk['end'])},Default,,0,0,0,,"
-            f"{{\\pos({round(pos_x * width)},{pos_y})}}{text}\n")
+            f"{{\\pos({width // 2},{round(pos_y * height)})}}{text}\n")
     path.write_text("".join(lines), encoding="utf-8")
     return path

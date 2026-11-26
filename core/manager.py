@@ -19,7 +19,7 @@ DEFAULT_CONFIG = {"pre": 20, "post": 30, "cooldown": 60, "window": 10,
                   "baseline_window": 300, "k": 3, "min_rate": 8,
                   "max_clip": 50, "subtitles": True,
                   "subtitle_model": "small", "subtitle_language": None,
-                  "subtitle_x": 0.5, "subtitle_size": 76}
+                  "subtitle_y": 0.51, "subtitle_size": 76}
 
 
 def _fmt_time(seconds: float) -> str:
@@ -74,7 +74,7 @@ class Manager:
             "logs": list(self.logs)[-60:],
             "rects": self.rects_for(self.channel),
             "subtitle": {"enabled": bool(self.config.get("subtitles", True)),
-                         "x": self.config.get("subtitle_x", 0.5),
+                         "y": self.config.get("subtitle_y", 0.51),
                          "size": self.config.get("subtitle_size", 76)},
             **snap,
         }
@@ -105,6 +105,7 @@ class Manager:
         data = self._load_json(self.channels_path, {})
         clean = {"webcam": self._clean(webcam or {}, DEFAULT_WEBCAM),
                  "gameplay": self._clean(gameplay or {}, DEFAULT_GAMEPLAY)}
+        data.pop(channel or "default", None)
         data[channel or "default"] = clean
         self.channels_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
         self.log(f"rect {channel}: webcam {clean['webcam']} gameplay {clean['gameplay']}")
@@ -112,14 +113,15 @@ class Manager:
     def save_config(self, patch: dict) -> None:
         if "subtitles" in patch:
             self.config["subtitles"] = bool(patch["subtitles"])
-        if "subtitle_x" in patch:
-            self.config["subtitle_x"] = min(max(float(patch["subtitle_x"]), 0.0), 1.0)
+        if "subtitle_y" in patch:
+            self.config["subtitle_y"] = min(max(float(patch["subtitle_y"]), 0.0), 1.0)
         if "subtitle_size" in patch:
             self.config["subtitle_size"] = min(max(int(patch["subtitle_size"]), 20), 200)
+        self.config.pop("subtitle_x", None)
         (self.root / "config.json").write_text(
             json.dumps(self.config, indent=2), encoding="utf-8")
         self.log(f"subtitle: {'on' if self.config.get('subtitles', True) else 'off'} "
-                 f"x {self.config.get('subtitle_x')} size {self.config.get('subtitle_size')}")
+                 f"y {self.config.get('subtitle_y')} size {self.config.get('subtitle_size')}")
 
     @staticmethod
     def _load_json(path: Path, default):
@@ -270,7 +272,7 @@ class Manager:
             "enabled": bool(self.config.get("subtitles", True)),
             "model": self.config.get("subtitle_model", "small"),
             "language": self.config.get("subtitle_language"),
-            "x": self.config.get("subtitle_x", 0.5),
+            "y": self.config.get("subtitle_y", 0.51),
             "size": self.config.get("subtitle_size", 76),
         }
 

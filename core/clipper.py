@@ -8,7 +8,7 @@ from pathlib import Path
 from .subtitles import group_words, transcribe, write_ass
 
 OUT_W, OUT_H = 1080, 1920
-FACE_H = 1000
+FACE_H = 920
 GAME_H = OUT_H - FACE_H
 
 _nvenc: bool | None = None
@@ -92,11 +92,13 @@ def _audio_chain(first_segment: Path) -> str:
     vstart = _first_pts(first_segment, "v:0")
     astart = _first_pts(first_segment, "a:0")
     delta = (astart - vstart) if vstart is not None and astart is not None else 0.0
+    # Video dipetakan ke start-nya sendiri (setpts). Audio harus ikut video:
+    # audio yang mulai lebih lambat ditunda, yang mulai lebih awal dipotong.
     if delta > 0.05:
-        return f"atrim=start={delta:.3f},asetpts=PTS-STARTPTS,aresample=async=1:first_pts=0"
-    if delta < -0.05:
-        ms = int(round(-delta * 1000))
+        ms = int(round(delta * 1000))
         return f"adelay={ms}|{ms},aresample=async=1:first_pts=0"
+    if delta < -0.05:
+        return f"atrim=start={-delta:.3f},asetpts=PTS-STARTPTS,aresample=async=1:first_pts=0"
     return "aresample=async=1:first_pts=0"
 
 
@@ -131,7 +133,7 @@ def _burn_subtitles(list_file: Path, workdir: Path, out_stem: str,
             return ""
         write_ass(chunks, workdir / ass_name,
                   font_size=int(opts.get("size", 76)),
-                  pos_x=float(opts.get("x", 0.5)))
+                  pos_y=float(opts.get("y", 0.51)))
         log(f"subtitle: {len(chunks)} baris")
         return f",ass={ass_name}"
     except Exception as exc:

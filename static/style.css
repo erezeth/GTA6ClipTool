@@ -116,7 +116,7 @@ button:disabled { opacity: .45; cursor: default; }
 .clip .cap b { color: var(--text); }
 .empty { color: var(--dim); }
 
-.rectrow { display: grid; grid-template-columns: minmax(280px, 640px) 1fr; gap: 18px; }
+.rectrow { display: grid; grid-template-columns: minmax(280px, 640px) 1fr; gap: 18px; align-items: start; }
 .previewwrap { position: relative; background: #000; border-radius: 8px; overflow: hidden; }
 #preview { width: 100%; display: block; }
 .nopreview {
