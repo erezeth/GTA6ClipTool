@@ -15,7 +15,7 @@ Pantau live YouTube, deteksi lonjakan live chat, potong klip vertikal 9:16
    rect-nya di dashboard: klik **Ambil frame**, lalu isi x/y/w/h (persen)
    sampai kotak hijau pas di webcam dan kotak biru pas di gameplay, lalu
    **Simpan**. Rect disimpan per channel.
-5. Posisi X dan ukuran subtitle diatur di fieldset **Subtitle** (x % dari lebar
+5. Posisi Y dan ukuran subtitle diatur di fieldset **Subtitle** (y % dari tinggi
    output, ukuran font dalam px). Tombol **Subtitle: ON/OFF** mematikan atau
    menyalakan subtitle untuk klip berikutnya.
 
@@ -36,7 +36,7 @@ Pantau live YouTube, deteksi lonjakan live chat, potong klip vertikal 9:16
 | `subtitles` | auto subtitle via faster-whisper (default `true`) |
 | `subtitle_model` | ukuran model whisper (default `small`) |
 | `subtitle_language` | kode bahasa, `null` = deteksi otomatis |
-| `subtitle_x` | posisi horizontal subtitle, 0..1 (default `0.5` = tengah) |
+| `subtitle_y` | posisi vertikal subtitle, 0..1 dari atas (default `0.51` = tengah) |
 | `subtitle_size` | ukuran font subtitle dalam px (default `76`) |
 
 `channels.json` menyimpan rect webcam dan gameplay per channel (0..1, relatif
