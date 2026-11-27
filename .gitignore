@@ -1,5 +1,7 @@
 .venv/
 buffer/
+/channels.json
+/config.json
 clips/
 __pycache__/
 .pytest_cache/
