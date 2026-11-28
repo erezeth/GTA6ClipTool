@@ -11,21 +11,50 @@ OUT_W, OUT_H = 1080, 1920
 FACE_H = 920
 GAME_H = OUT_H - FACE_H
 
-_nvenc: bool | None = None
-_nvenc_lock = threading.Lock()
+# Kandidat encoder H.264, tercepat/terbaik duluan. Opsi mengikuti encoder:
+# -cq hanya untuk NVENC, -crf hanya untuk x264, -b:v untuk openh264.
+_ENCODERS: list[tuple[str, list[str]]] = [
+    ("h264_nvenc", ["-c:v", "h264_nvenc", "-preset", "p5", "-rc", "vbr",
+                    "-cq", "21", "-b:v", "0"]),
+    ("libx264", ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20"]),
+    ("libopenh264", ["-c:v", "libopenh264", "-b:v", "8M"]),
+    ("mpeg4", ["-c:v", "mpeg4", "-q:v", "4"]),
+]
+
+_probe_cache: dict[str, bool] = {}
+_probe_lock = threading.Lock()
+
+
+def encoder_works(name: str) -> bool:
+    """True kalau encoder benar-benar bisa dipakai, bukan cuma terdaftar.
+
+    `ffmpeg -encoders` tetap mencantumkan h264_nvenc walau tidak ada GPU/driver
+    NVIDIA, jadi encoder harus dicoba encode satu frame. Hasil di-cache.
+    """
+    with _probe_lock:
+        if name in _probe_cache:
+            return _probe_cache[name]
+    try:
+        res = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-loglevel", "error",
+             "-f", "lavfi", "-i", "nullsrc=s=256x256:d=0.1",
+             "-c:v", name, "-f", "null", "-"],
+            capture_output=True, timeout=30)
+        ok = res.returncode == 0
+    except Exception:
+        ok = False
+    with _probe_lock:
+        _probe_cache[name] = ok
+    return ok
+
+
+def video_encoders() -> list[list[str]]:
+    """Argumen encoder yang bisa dipakai, urut preferensi. Kosong kalau tidak ada."""
+    return [args for name, args in _ENCODERS if encoder_works(name)]
 
 
 def has_nvenc() -> bool:
-    global _nvenc
-    with _nvenc_lock:
-        if _nvenc is None:
-            try:
-                out = subprocess.run(["ffmpeg", "-hide_banner", "-encoders"],
-                                     capture_output=True, text=True, timeout=30).stdout
-                _nvenc = "h264_nvenc" in out
-            except Exception:
-                _nvenc = False
-        return _nvenc
+    return encoder_works("h264_nvenc")
 
 
 def _clamp_rect(src_w: int, src_h: int, rect: dict,
@@ -166,24 +195,35 @@ def render(segments: list[str], out_path: Path, rects: dict, workdir: Path,
     if has_audio:
         filters.append(f"[0:a]{audio_filter}[a]")
 
-    if has_nvenc():
-        enc = ["-c:v", "h264_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", "21", "-b:v", "0"]
-    else:
-        enc = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20"]
-
-    cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-           "-f", "concat", "-safe", "0", "-i", str(list_file),
-           "-filter_complex", ";".join(filters), "-map", "[v]"]
+    base = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+            "-f", "concat", "-safe", "0", "-i", str(list_file),
+            "-filter_complex", ";".join(filters), "-map", "[v]"]
     if has_audio:
-        cmd += ["-map", "[a]", "-c:a", "aac", "-b:a", "128k"]
+        base += ["-map", "[a]", "-c:a", "aac", "-b:a", "128k"]
     if max_duration:
-        cmd += ["-t", f"{max_duration:g}"]
-    cmd += [*enc, "-movflags", "+faststart", str(out_path)]
+        base += ["-t", f"{max_duration:g}"]
 
-    log("render: " + " ".join(cmd))
-    res = subprocess.run(cmd, capture_output=True, text=True, cwd=workdir)
-    if res.returncode != 0:
-        raise RuntimeError((res.stderr or "").strip()[-800:] or "ffmpeg gagal")
+    encoders = video_encoders()
+    if not encoders:
+        list_file.unlink(missing_ok=True)
+        (workdir / f"sub_{stem}.ass").unlink(missing_ok=True)
+        raise RuntimeError("tidak ada encoder video yang bisa dipakai; cek instalasi ffmpeg")
+
+    last_error = ""
+    for enc in encoders:
+        cmd = [*base, *enc, "-movflags", "+faststart", str(out_path)]
+        log("render: " + " ".join(cmd))
+        res = subprocess.run(cmd, capture_output=True, text=True, cwd=workdir)
+        if res.returncode == 0:
+            break
+        last_error = (res.stderr or "").strip()[-800:]
+        log(f"encoder {enc[1]} gagal, coba berikutnya: {last_error[-300:]}")
+        out_path.unlink(missing_ok=True)
+    else:
+        list_file.unlink(missing_ok=True)
+        (workdir / f"sub_{stem}.ass").unlink(missing_ok=True)
+        raise RuntimeError(last_error or "ffmpeg gagal")
+
     list_file.unlink(missing_ok=True)
     (workdir / f"sub_{stem}.ass").unlink(missing_ok=True)
     return out_path

@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 import core.clipper as clipper
 from core.clipper import GAME_H, build_filter, pick_segments
 
@@ -52,11 +54,77 @@ def test_render_caps_duration(tmp_path, monkeypatch):
         return Result()
 
     monkeypatch.setattr(clipper.subprocess, "run", fake_run)
-    monkeypatch.setattr(clipper, "has_nvenc", lambda: False)
+    monkeypatch.setattr(clipper, "video_encoders", lambda: [["-c:v", "libx264"]])
     clipper.render(["seg_000000.ts"], tmp_path / "out.mp4", {}, tmp_path,
                    max_duration=50)
     cmd = calls[-1]
     assert cmd[cmd.index("-t") + 1] == "50"
+
+
+def test_video_encoders_skips_unusable_hardware(monkeypatch):
+    monkeypatch.setattr(clipper, "encoder_works",
+                        lambda name: name == "libopenh264")
+    assert clipper.video_encoders() == [["-c:v", "libopenh264", "-b:v", "8M"]]
+
+
+def test_video_encoders_keeps_preference_order(monkeypatch):
+    monkeypatch.setattr(clipper, "encoder_works",
+                        lambda name: name in ("h264_nvenc", "libx264"))
+    names = [args[1] for args in clipper.video_encoders()]
+    assert names == ["h264_nvenc", "libx264"]
+
+
+def test_render_falls_back_to_next_encoder(tmp_path, monkeypatch):
+    (tmp_path / "seg_000000.ts").write_bytes(b"")
+    renders = []
+
+    class Result:
+        def __init__(self, returncode=0, stdout="", stderr=""):
+            self.returncode = returncode
+            self.stdout = stdout
+            self.stderr = stderr
+
+    def fake_run(cmd, **kwargs):
+        if cmd[0] == "ffprobe":
+            stream = cmd[cmd.index("-select_streams") + 1]
+            return Result(stdout="" if stream == "a" else "1920,1080")
+        renders.append(cmd)
+        if "h264_nvenc" in cmd:
+            return Result(1, stderr="[h264_nvenc] Cannot load libcuda.so.1")
+        return Result()
+
+    monkeypatch.setattr(clipper.subprocess, "run", fake_run)
+    monkeypatch.setattr(clipper, "video_encoders", lambda: [
+        ["-c:v", "h264_nvenc"],
+        ["-c:v", "libopenh264", "-b:v", "8M"],
+    ])
+    clipper.render(["seg_000000.ts"], tmp_path / "out.mp4", {}, tmp_path,
+                   log=lambda msg: None)
+    assert len(renders) == 2
+    assert "h264_nvenc" in renders[0]
+    assert "libopenh264" in renders[1]
+
+
+def test_render_raises_when_all_encoders_fail(tmp_path, monkeypatch):
+    (tmp_path / "seg_000000.ts").write_bytes(b"")
+
+    class Result:
+        def __init__(self, returncode=0, stdout="", stderr=""):
+            self.returncode = returncode
+            self.stdout = stdout
+            self.stderr = stderr
+
+    def fake_run(cmd, **kwargs):
+        if cmd[0] == "ffprobe":
+            stream = cmd[cmd.index("-select_streams") + 1]
+            return Result(stdout="" if stream == "a" else "1920,1080")
+        return Result(1, stderr="[h264_nvenc] Cannot load libcuda.so.1")
+
+    monkeypatch.setattr(clipper.subprocess, "run", fake_run)
+    monkeypatch.setattr(clipper, "video_encoders", lambda: [["-c:v", "h264_nvenc"]])
+    with pytest.raises(RuntimeError, match="libcuda"):
+        clipper.render(["seg_000000.ts"], tmp_path / "out.mp4", {}, tmp_path,
+                       log=lambda msg: None)
 
 
 def test_pick_segments_covers_window():
